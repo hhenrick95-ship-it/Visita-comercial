@@ -1,0 +1,7 @@
+UPDATE visit_forms 
+SET manager = 'EQUIPE M - AILTON SOARES DOS SANTOS (Supervisor)'
+WHERE manager = 'EQUIPE M - AILTON SOARES DOS SANTOS - M - AILTON SOARES DOS SANTOS (Supervisor)';
+
+UPDATE visit_forms 
+SET manager = 'EQUIPE C - JOSE RAFAELY TRINDADE MIRANDA (Supervisor)'
+WHERE manager = 'EQUIPE C - JOSE MIRANDA - C - JOSE RAFAELY TRINDADE MIRANDA (Supervisor)';

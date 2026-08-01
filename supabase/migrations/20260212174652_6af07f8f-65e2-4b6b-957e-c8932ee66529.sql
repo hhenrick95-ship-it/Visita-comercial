@@ -1,0 +1,1 @@
+ALTER TABLE public.tutorial_slides ADD COLUMN screenshot_layout text DEFAULT 'horizontal';
