@@ -29,6 +29,7 @@ import { BarChart3 } from "lucide-react";
 import { TemplateSelector } from "@/components/TemplateSelector";
 import { SubmissionsList } from "@/components/SubmissionsList";
 import { useFormTemplates, type FormTemplate } from "@/hooks/useFormTemplates";
+import { VisitsByRcaPanel, type SupervisorOption, type RcaRosterMember } from "@/components/VisitsByRcaPanel";
 
 interface VisitData {
   id: string;
@@ -60,6 +61,7 @@ interface TeamGoal {
 }
 
 interface GestorOption {
+  id: string;
   cod_rca_lopes: string;
   nome_rca: string | null;
   nome_equipe: string;
@@ -96,10 +98,11 @@ export default function Dashboard() {
   const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [availableTeams, setAvailableTeams] = useState<{cod_equipe: string, nome_equipe: string}[]>([]);
   const [availableGestores, setAvailableGestores] = useState<GestorOption[]>([]);
+  const [rcaRoster, setRcaRoster] = useState<RcaRosterMember[]>([]);
   const [selectedGoalDay, setSelectedGoalDay] = useState<number | null>(null); // Dia selecionado nas metas
 
   // Layout configuration
-  const ALL_COMPONENTS = ["goals", "kpis", "visitsByDay", "ruptures", "opportunities", "charts", "insights", "map", "visits"];
+  const ALL_COMPONENTS = ["goals", "kpis", "visitsByDay", "rcaFocus", "ruptures", "opportunities", "charts", "insights", "map", "visits"];
   const [componentOrder, setComponentOrder] = useState<string[]>(ALL_COMPONENTS);
   
   // Ruptures data
@@ -289,7 +292,7 @@ export default function Dashboard() {
       // Buscar coordenadores e supervisores para metas
       const { data: gestoresData, error: gestoresError } = await supabase
         .from("teams_vendors")
-        .select("cod_rca_lopes, nome_rca, nome_equipe, cargo")
+        .select("id, cod_rca_lopes, nome_rca, nome_equipe, cargo")
         .or("cargo.eq.coordenador,cargo.eq.gerente,cargo.eq.supervisor")
         .order("nome_equipe");
 
@@ -305,8 +308,18 @@ export default function Dashboard() {
           fullName: `${teamPrefix} - ${cleanName} (${cargoLabel})`
         };
       });
-      
+
       setAvailableGestores(gestores);
+
+      // Buscar RCAs (vendedores) vinculados a cada supervisor/coordenador,
+      // usado no painel "Atenção por RCA" para detectar RCAs sem visita.
+      const { data: rcaData, error: rcaError } = await supabase
+        .from("teams_vendors")
+        .select("id, cod_rca_lopes, nome_rca, nome_equipe, supervisor_id")
+        .eq("cargo", "vendedor");
+
+      if (rcaError) throw rcaError;
+      setRcaRoster((rcaData || []) as RcaRosterMember[]);
     } catch (error) {
       console.error("Erro ao carregar equipes:", error);
     }
@@ -1079,6 +1092,21 @@ export default function Dashboard() {
 
             case "visitsByDay":
               return <VisitsByDayTable key="visitsByDay" visits={rawFilteredVisits} allManagers={filteredManagersForTable} dailyGoal={7} />;
+
+            case "rcaFocus":
+              return (
+                <VisitsByRcaPanel
+                  key="rcaFocus"
+                  visits={rawFilteredVisits}
+                  supervisors={availableGestores}
+                  rcaRoster={rcaRoster}
+                  selectedManagers={filterManagers}
+                  onSelectManager={(managerFullName) => {
+                    setFilterManagers([managerFullName]);
+                    toast.info(`Filtrado por gestor: ${managerFullName}`);
+                  }}
+                />
+              );
 
             case "ruptures":
               // Filtrar rupturas pelos filtros ativos

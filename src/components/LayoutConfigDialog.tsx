@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { GripVertical, Target, BarChart3, Map, List, Table, AlertTriangle, Lightbulb } from "lucide-react";
+import { GripVertical, Target, BarChart3, Map, List, Table, AlertTriangle, Lightbulb, Scale } from "lucide-react";
 import { toast } from "sonner";
 
 interface LayoutConfigDialogProps {
@@ -24,6 +24,7 @@ const componentLabels: Record<string, { label: string; icon: any }> = {
   goals: { label: "Metas Diárias", icon: Target },
   kpis: { label: "Indicadores (KPIs)", icon: BarChart3 },
   visitsByDay: { label: "Visitas por Gestor/Dia", icon: Table },
+  rcaFocus: { label: "Atenção por RCA", icon: Scale },
   ruptures: { label: "Rupturas Identificadas", icon: AlertTriangle },
   opportunities: { label: "Oportunidades Detectadas", icon: Lightbulb },
   charts: { label: "Gráficos", icon: BarChart3 },
@@ -85,7 +86,7 @@ export function LayoutConfigDialog({
   };
 
   const handleReset = () => {
-    const defaultOrder = ["goals", "kpis", "visitsByDay", "ruptures", "opportunities", "charts", "insights", "map", "visits"];
+    const defaultOrder = ["goals", "kpis", "visitsByDay", "rcaFocus", "ruptures", "opportunities", "charts", "insights", "map", "visits"];
     setOrder(defaultOrder);
   };
 
