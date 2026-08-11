@@ -44,7 +44,10 @@ const PAGE_SIZE = 20;
 export default function ClientUpdate() {
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<ClientRow[]>([]);
-  const [rcaLinks, setRcaLinks] = useState<Map<number, { cod: string; nome: string }[]>>(new Map());
+  // Codcli dos clientes vinculados ao RCA atualmente selecionado no filtro (vínculo extra,
+  // fora do cod_rca principal). Buscado sob demanda, só para o RCA escolhido, para não ter
+  // que carregar a tabela de vínculos inteira (pode chegar a centenas de milhares de linhas).
+  const [secondaryLinkedCods, setSecondaryLinkedCods] = useState<Set<number>>(new Set());
   const [rcaFilter, setRcaFilter] = useState<string>("__all__");
   const [statusFilter, setStatusFilter] = useState<string>("todos");
   const [search, setSearch] = useState("");
@@ -77,28 +80,6 @@ export default function ClientUpdate() {
         if (from > 100000) break; // segurança
       }
       setClients(all);
-
-      // Vínculos cliente x RCA (até 7 RCAs por cliente)
-      const links = new Map<number, { cod: string; nome: string }[]>();
-      let lFrom = 0;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { data, error } = await supabase
-          .from("clientes_cadastro_rcas")
-          .select("codcli,cod_rca,nome_rca")
-          .range(lFrom, lFrom + PAGE - 1);
-        if (error) throw error;
-        const batch = data || [];
-        for (const l of batch as any[]) {
-          const arr = links.get(l.codcli) || [];
-          arr.push({ cod: l.cod_rca, nome: l.nome_rca || l.cod_rca });
-          links.set(l.codcli, arr);
-        }
-        if (batch.length < PAGE) break;
-        lFrom += PAGE;
-        if (lFrom > 400000) break;
-      }
-      setRcaLinks(links);
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || "Erro ao carregar clientes");
@@ -111,26 +92,60 @@ export default function ClientUpdate() {
     load();
   }, []);
 
-  // RCAs disponíveis (a partir do que o usuário vê)
+  // Vínculo extra cliente x RCA (fora do cod_rca principal), buscado só para o RCA
+  // selecionado no filtro — evita carregar a tabela de vínculos inteira na memória.
+  useEffect(() => {
+    if (rcaFilter === "__all__") {
+      setSecondaryLinkedCods(new Set());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const PAGE = 1000;
+        let from = 0;
+        const codes = new Set<number>();
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { data, error } = await supabase
+            .from("clientes_cadastro_rcas")
+            .select("codcli")
+            .eq("cod_rca", rcaFilter)
+            .range(from, from + PAGE - 1);
+          if (error) throw error;
+          const batch = data || [];
+          for (const l of batch as any[]) codes.add(l.codcli);
+          if (batch.length < PAGE) break;
+          from += PAGE;
+          if (from > 50000) break; // segurança
+        }
+        if (!cancelled) setSecondaryLinkedCods(codes);
+      } catch (err: any) {
+        console.error(err);
+        if (!cancelled) setSecondaryLinkedCods(new Set());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rcaFilter]);
+
+  // RCAs disponíveis (a partir do RCA principal de cada cliente)
   const rcas = useMemo(() => {
     const map = new Map<string, string>();
-    for (const list of rcaLinks.values()) {
-      for (const l of list) map.set(l.cod, l.nome);
-    }
     for (const c of clients) {
       if (c.cod_rca) map.set(c.cod_rca, c.nome_rca || c.cod_rca);
     }
     return Array.from(map.entries())
       .map(([cod, nome]) => ({ cod, nome }))
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [clients, rcaLinks]);
+  }, [clients]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return clients.filter((c) => {
       if (rcaFilter !== "__all__") {
-        const list = rcaLinks.get(c.codcli);
-        const linked = list ? list.some((l) => l.cod === rcaFilter) : c.cod_rca === rcaFilter;
+        const linked = c.cod_rca === rcaFilter || secondaryLinkedCods.has(c.codcli);
         if (!linked) return false;
       }
       if (statusFilter !== "todos" && c.status_atualizacao !== statusFilter) return false;
@@ -142,7 +157,7 @@ export default function ClientUpdate() {
         (c.cnpj || "").toLowerCase().includes(q)
       );
     });
-  }, [clients, rcaLinks, rcaFilter, statusFilter, search]);
+  }, [clients, rcaFilter, statusFilter, search, secondaryLinkedCods]);
 
   useEffect(() => {
     setPage(1);
