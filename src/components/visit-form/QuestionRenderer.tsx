@@ -61,19 +61,67 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
   const [clientSearch, setClientSearch] = useState("");
   const [loadingClients, setLoadingClients] = useState(false);
 
-  // Carrega clientes da base cadastral (busca no servidor, até 500 resultados por consulta)
+  // Resolve qual pergunta vendor_select (RCA) alimenta este client_select.
+  // 1) usa conditional_logic.vendor_question_id se existir
+  // 2) senão, encontra o vendor_select anterior na mesma seção
+  const resolvedVendorQuestionId: string | null = (() => {
+    const explicit = question.conditional_logic?.vendor_question_id as string | undefined;
+    if (explicit) return explicit;
+    if (question.question_type !== "client_select" || !sectionQuestions) return null;
+    const idx = sectionQuestions.findIndex((q) => q.id === question.id);
+    if (idx < 0) return null;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (sectionQuestions[i].question_type === "vendor_select") {
+        return sectionQuestions[i].id;
+      }
+    }
+    return null;
+  })();
+  const vendorFieldKey = resolvedVendorQuestionId ? `q_${resolvedVendorQuestionId}` : "";
+  const watchedVendorValue = form.watch(vendorFieldKey || "__noop_client__");
+
+  // Carrega clientes da base cadastral (busca no servidor, até 500 resultados por consulta).
+  // Quando há um RCA (vendor_select) antes na mesma seção, a lista é restrita
+  // aos clientes vinculados a esse RCA (direto em clientes_cadastro.cod_rca
+  // ou via clientes_cadastro_rcas, que guarda vínculos adicionais).
   useEffect(() => {
     if (question.question_type !== "client_select") return;
+    if (vendorFieldKey && !watchedVendorValue) {
+      setClients([]);
+      return;
+    }
     let cancelled = false;
     const timer = setTimeout(async () => {
       setLoadingClients(true);
       try {
+        let allowedCodcli: number[] | null = null;
+        if (vendorFieldKey && watchedVendorValue) {
+          const [{ data: direct, error: directErr }, { data: linked, error: linkedErr }] = await Promise.all([
+            supabase.from("clientes_cadastro").select("codcli").eq("cod_rca", watchedVendorValue),
+            supabase.from("clientes_cadastro_rcas").select("codcli").eq("cod_rca", watchedVendorValue),
+          ]);
+          if (directErr) throw directErr;
+          if (linkedErr) throw linkedErr;
+          const ids = new Set<number>();
+          (direct || []).forEach((c: any) => ids.add(c.codcli));
+          (linked || []).forEach((c: any) => ids.add(c.codcli));
+          allowedCodcli = Array.from(ids);
+          if (allowedCodcli.length === 0) {
+            if (!cancelled) setClients([]);
+            return;
+          }
+        }
+
         const term = clientSearch.trim();
         let query = supabase
           .from("clientes_cadastro")
           .select("codcli, razao_social, nome_fantasia, cidade, uf, cnpj")
           .order("razao_social")
           .limit(500);
+
+        if (allowedCodcli) {
+          query = query.in("codcli", allowedCodcli);
+        }
 
         if (term) {
           const digits = term.replace(/\D/g, "");
@@ -111,7 +159,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [question.question_type, clientSearch]);
+  }, [question.question_type, clientSearch, vendorFieldKey, watchedVendorValue]);
 
   // Resolve qual pergunta team_select alimenta este vendor_select.
   // 1) usa conditional_logic.team_question_id se existir
@@ -710,11 +758,21 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                   onSearchChange={setClientSearch}
                   placeholder={question.placeholder || "Selecione o cliente..."}
                   searchPlaceholder="Buscar por nome, CNPJ ou código..."
-                  emptyMessage={loadingClients ? "Carregando..." : "Nenhum cliente encontrado."}
+                  emptyMessage={
+                    loadingClients
+                      ? "Carregando..."
+                      : vendorFieldKey && !watchedVendorValue
+                        ? "Selecione um RCA primeiro"
+                        : vendorFieldKey
+                          ? "Nenhum cliente encontrado para este RCA."
+                          : "Nenhum cliente encontrado."
+                  }
                 />
               </FormControl>
               <FormDescription>
-                Digite parte do nome, CNPJ ou código para buscar em toda a base de clientes.
+                {vendorFieldKey
+                  ? "Lista restrita aos clientes do RCA selecionado. Digite parte do nome, CNPJ ou código para filtrar."
+                  : "Digite parte do nome, CNPJ ou código para buscar em toda a base de clientes."}
               </FormDescription>
               <FormMessage />
             </FormItem>
