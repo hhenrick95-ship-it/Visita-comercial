@@ -22,6 +22,7 @@ import {
   Sparkles,
   PlusCircle,
   UserCog,
+  Truck,
 } from "lucide-react";
 import { getShortManagerName } from "@/lib/normalizeManager";
 import { formatDateOnlyPtBR, toDateOnlyString } from "@/lib/utils";
@@ -164,6 +165,13 @@ export default function Home() {
       label: "Sem Localização",
       desc: "Auditoria de GPS",
       icon: MapPinOff,
+      roles: ["admin"],
+    },
+    {
+      to: "/satisfacao-logistica",
+      label: "Satisfação Logística",
+      desc: "Pesquisa de qualidade da entrega",
+      icon: Truck,
       roles: ["admin"],
     },
     {

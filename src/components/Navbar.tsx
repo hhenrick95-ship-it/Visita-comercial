@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "./ui/button";
-import { LogOut, Menu, X, Settings, Users, UsersRound, FileText, Presentation, MapPinOff } from "lucide-react";
+import { LogOut, Menu, X, Settings, Users, UsersRound, FileText, Presentation, MapPinOff, Truck } from "lucide-react";
 import { useState, useEffect } from "react";
 import logoLopes from "@/assets/logo-lopes.png";
 import {
@@ -97,6 +97,7 @@ export const Navbar = () => {
     { path: "/users", label: "Usuários", icon: Users, roles: ["admin"] },
     { path: "/team-management", label: "Equipes", icon: UsersRound, roles: ["admin"] },
     { path: "/sem-localizacao", label: "Sem Localização", icon: MapPinOff, roles: ["admin"] },
+    { path: "/satisfacao-logistica", label: "Satisfação Logística", icon: Truck, roles: ["admin"] },
   ];
 
   const filteredMainItems = mainNavItems.filter((item) =>

@@ -25,6 +25,7 @@ import Documentation from "./pages/Documentation";
 import Tutorial from "./pages/Tutorial";
 import ClientUpdate from "./pages/ClientUpdate";
 import PesquisaSatisfacaoLogistica from "./pages/PesquisaSatisfacaoLogistica";
+import SatisfacaoLogisticaResultados from "./pages/SatisfacaoLogisticaResultados";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -113,6 +114,14 @@ const App = () => (
               element={
                 <ProtectedRoute requireRole="admin">
                   <SemLocalizacao />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/satisfacao-logistica"
+              element={
+                <ProtectedRoute requireRole="admin">
+                  <SatisfacaoLogisticaResultados />
                 </ProtectedRoute>
               }
             />
