@@ -621,6 +621,45 @@ export type Database = {
         }
         Relationships: []
       }
+      pesquisa_satisfacao_logistica: {
+        Row: {
+          cliente_codigo: string | null
+          cliente_nome: string | null
+          condicao_produtos: string
+          created_at: string
+          entrega_no_prazo: string
+          id: string
+          nota_atendimento: number
+          nota_satisfacao: number
+          pedido_correto: string
+          sugestao_melhoria: string | null
+        }
+        Insert: {
+          cliente_codigo?: string | null
+          cliente_nome?: string | null
+          condicao_produtos: string
+          created_at?: string
+          entrega_no_prazo: string
+          id?: string
+          nota_atendimento: number
+          nota_satisfacao: number
+          pedido_correto: string
+          sugestao_melhoria?: string | null
+        }
+        Update: {
+          cliente_codigo?: string | null
+          cliente_nome?: string | null
+          condicao_produtos?: string
+          created_at?: string
+          entrega_no_prazo?: string
+          id?: string
+          nota_atendimento?: number
+          nota_satisfacao?: number
+          pedido_correto?: string
+          sugestao_melhoria?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string | null

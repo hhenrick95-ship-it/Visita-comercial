@@ -24,6 +24,7 @@ import FeedbackForm from "./pages/FeedbackForm";
 import Documentation from "./pages/Documentation";
 import Tutorial from "./pages/Tutorial";
 import ClientUpdate from "./pages/ClientUpdate";
+import PesquisaSatisfacaoLogistica from "./pages/PesquisaSatisfacaoLogistica";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -40,6 +41,7 @@ const App = () => (
             {/* Public routes */}
             <Route path="/auth" element={<Auth />} />
             <Route path="/pending" element={<PendingApproval />} />
+            <Route path="/pesquisa/satisfacao-logistica" element={<PesquisaSatisfacaoLogistica />} />
             
             {/* Protected routes - require approval */}
             <Route

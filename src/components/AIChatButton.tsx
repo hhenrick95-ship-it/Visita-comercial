@@ -1,10 +1,15 @@
 import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AIChat } from './AIChat';
 
 export const AIChatButton = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const { pathname } = useLocation();
+
+  // Pesquisas públicas (sem login) não mostram o chat
+  if (pathname.startsWith('/pesquisa')) return null;
 
   return (
     <>
