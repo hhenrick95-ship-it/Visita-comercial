@@ -22,6 +22,7 @@ import {
 } from "@/lib/exportTeamsXLSX";
 import { Undo2, AlertTriangle, History, Clock, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
 import { planNewRoutes, createNewRoutes, type NewRoutesPlan } from "@/lib/syncNewRoutes";
+import { readPortfolioFile, importPortfolio, type PortfolioPreview } from "@/lib/importClientPortfolio";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Dialog,
@@ -348,6 +349,43 @@ export default function TeamManagement() {
     }
   };
 
+  // Importação de carteira de clientes por RCA
+  const [portfolioPreview, setPortfolioPreview] = useState<PortfolioPreview | null>(null);
+  const [importingPortfolio, setImportingPortfolio] = useState(false);
+
+  const handlePortfolioSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportingPortfolio(true);
+    try {
+      const preview = await readPortfolioFile(file);
+      if (preview.rows.length === 0) {
+        toast.error("Nenhuma linha válida na planilha. " + preview.errors.slice(0, 3).join("; "));
+        return;
+      }
+      setPortfolioPreview(preview);
+    } catch (error: any) {
+      toast.error("Erro ao ler planilha: " + error.message);
+    } finally {
+      setImportingPortfolio(false);
+    }
+  };
+
+  const handleConfirmPortfolio = async () => {
+    if (!portfolioPreview) return;
+    setImportingPortfolio(true);
+    try {
+      await importPortfolio(portfolioPreview.rows);
+      toast.success(`Carteira importada: ${portfolioPreview.rows.length} vínculo(s) cliente x RCA.`);
+      setPortfolioPreview(null);
+    } catch (error: any) {
+      toast.error("Erro ao importar carteira: " + error.message);
+    } finally {
+      setImportingPortfolio(false);
+    }
+  };
+
   const handleExportXLSX = () => {
     if (teams.length === 0) {
       toast.error("Não há dados para exportar");
@@ -595,6 +633,22 @@ export default function TeamManagement() {
                 <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
                 Sincronizar rotas novas
               </Button>
+              <label htmlFor="portfolio-upload">
+                <Button variant="outline" className="gap-2 glass-card border-0" asChild disabled={importingPortfolio}>
+                  <span>
+                    <Upload className="h-4 w-4" />
+                    {importingPortfolio ? "Lendo carteira..." : "Importar carteira de clientes"}
+                  </span>
+                </Button>
+              </label>
+              <input
+                id="portfolio-upload"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={handlePortfolioSelect}
+                disabled={importingPortfolio}
+              />
               <Button variant="outline" className="gap-2 glass-card border-0" onClick={handleExportXLSX}>
                 <Download className="h-4 w-4" />
                 Exportar XLSX
@@ -1166,6 +1220,54 @@ export default function TeamManagement() {
                 className="bg-amber-600 hover:bg-amber-700"
               >
                 Confirmar Desfazer
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Confirmação de importação de carteira */}
+        <AlertDialog
+          open={portfolioPreview !== null}
+          onOpenChange={(open) => !open && !importingPortfolio && setPortfolioPreview(null)}
+        >
+          <AlertDialogContent className="max-w-lg">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Importar carteira de clientes</AlertDialogTitle>
+              <AlertDialogDescription>
+                {portfolioPreview &&
+                  `${portfolioPreview.rows.length} vínculo(s) cliente x RCA, sendo ${portfolioPreview.newClients} cliente(s) novo(s) na base. Clientes que já existem não terão os dados alterados.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {portfolioPreview && (
+              <ScrollArea className="max-h-72 pr-3">
+                <div className="space-y-1 text-sm">
+                  {Object.entries(portfolioPreview.byRca).map(([rca, count]) => (
+                    <div key={rca} className="flex justify-between rounded-md border p-2">
+                      <span className="font-medium">{rca}</span>
+                      <span className="text-muted-foreground">{count} cliente(s)</span>
+                    </div>
+                  ))}
+                  {portfolioPreview.errors.length > 0 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2">
+                      <p className="font-medium">{portfolioPreview.errors.length} linha(s) ignorada(s):</p>
+                      {portfolioPreview.errors.slice(0, 5).map((err) => (
+                        <p key={err} className="text-muted-foreground">{err}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={importingPortfolio}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={importingPortfolio}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleConfirmPortfolio();
+                }}
+              >
+                {importingPortfolio ? "Importando..." : "Importar"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
