@@ -20,7 +20,8 @@ import {
   type ValidationResult,
   type ImportHistoryRecord 
 } from "@/lib/exportTeamsXLSX";
-import { Undo2, AlertTriangle, History, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Undo2, AlertTriangle, History, Clock, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
+import { planNewRoutes, createNewRoutes, type NewRoutesPlan } from "@/lib/syncNewRoutes";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Dialog,
@@ -312,6 +313,41 @@ export default function TeamManagement() {
     setLoadingHistory(false);
   };
 
+  // Sincronização de rotas novas a partir da base de clientes
+  const [syncPlan, setSyncPlan] = useState<NewRoutesPlan | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleCheckNewRoutes = async () => {
+    setSyncing(true);
+    try {
+      const plan = await planNewRoutes(teams);
+      if (plan.toCreate.length === 0 && plan.skipped.length === 0) {
+        toast.success("Nenhuma rota nova encontrada: todas as rotas da base de clientes já estão cadastradas.");
+        return;
+      }
+      setSyncPlan(plan);
+    } catch (error: any) {
+      toast.error("Erro ao buscar rotas novas: " + error.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleConfirmNewRoutes = async () => {
+    if (!syncPlan || syncPlan.toCreate.length === 0) return;
+    setSyncing(true);
+    try {
+      await createNewRoutes(syncPlan.toCreate);
+      toast.success(`${syncPlan.toCreate.length} rota(s) cadastrada(s) com sucesso!`);
+      setSyncPlan(null);
+      loadTeams();
+    } catch (error: any) {
+      toast.error("Erro ao cadastrar rotas: " + error.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleExportXLSX = () => {
     if (teams.length === 0) {
       toast.error("Não há dados para exportar");
@@ -550,6 +586,15 @@ export default function TeamManagement() {
           description="Gerencie coordenadores, supervisores e vendedores"
           actions={
             <div className="flex gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                className="gap-2 glass-card border-0"
+                onClick={handleCheckNewRoutes}
+                disabled={syncing || loading}
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                Sincronizar rotas novas
+              </Button>
               <Button variant="outline" className="gap-2 glass-card border-0" onClick={handleExportXLSX}>
                 <Download className="h-4 w-4" />
                 Exportar XLSX
@@ -1122,6 +1167,58 @@ export default function TeamManagement() {
               >
                 Confirmar Desfazer
               </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Confirmação de rotas novas */}
+        <AlertDialog open={syncPlan !== null} onOpenChange={(open) => !open && !syncing && setSyncPlan(null)}>
+          <AlertDialogContent className="max-w-lg">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Rotas novas encontradas</AlertDialogTitle>
+              <AlertDialogDescription>
+                {syncPlan && syncPlan.toCreate.length > 0
+                  ? "Estas rotas estão na base de clientes mas não em Gestão de Equipes. Cada uma será cadastrada como Vendedor, com a equipe e o supervisor da rota vizinha."
+                  : "Nenhuma rota pôde ser cadastrada automaticamente."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {syncPlan && (
+              <ScrollArea className="max-h-72 pr-3">
+                <div className="space-y-2 text-sm">
+                  {syncPlan.toCreate.map((r) => (
+                    <div key={r.cod_rca_lopes} className="rounded-md border p-2">
+                      <p className="font-medium">{r.nome_rca} ({r.cod_rca_lopes})</p>
+                      <p className="text-muted-foreground">
+                        {r.nome_equipe} • igual a {r.baseadoEm}
+                      </p>
+                    </div>
+                  ))}
+                  {syncPlan.skipped.length > 0 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2">
+                      <p className="font-medium">Cadastre manualmente (sem rota vizinha):</p>
+                      {syncPlan.skipped.map((s) => (
+                        <p key={s.cod_rca} className="text-muted-foreground">
+                          {s.nome_rca || "Sem nome"} ({s.cod_rca})
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={syncing}>Cancelar</AlertDialogCancel>
+              {syncPlan && syncPlan.toCreate.length > 0 && (
+                <AlertDialogAction
+                  disabled={syncing}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleConfirmNewRoutes();
+                  }}
+                >
+                  {syncing ? "Cadastrando..." : `Cadastrar ${syncPlan.toCreate.length} rota(s)`}
+                </AlertDialogAction>
+              )}
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
