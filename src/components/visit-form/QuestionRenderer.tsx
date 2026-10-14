@@ -287,14 +287,15 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
     try {
       let data: any[] = [];
       
-      // Se for supervisor, primeiro tentar buscar vendedores vinculados
+      // Se for supervisor, buscar vendedores vinculados a ele e também os
+      // da equipe ainda sem supervisor (ex: rotas recém-cadastradas)
       if (gestorCargo === "supervisor" || gestorCargo === "gerente") {
         const { data: linkedVendors, error } = await supabase
           .from("teams_vendors")
           .select("nome_rca, cod_rca_lopes, supervisor_id")
           .eq("cod_equipe", teamCode)
           .eq("cargo", "vendedor")
-          .eq("supervisor_id", gestorId)
+          .or(`supervisor_id.eq.${gestorId},supervisor_id.is.null`)
           .order("nome_rca");
         
         if (error) throw error;
