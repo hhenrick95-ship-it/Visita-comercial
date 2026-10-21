@@ -23,13 +23,10 @@ try {
     $command.CommandTimeout = 600
     $command.CommandText = @"
 SELECT codcli, cliente, fantasia, cgcent, tipofj, endereco, bairro, cidade, estado,
-       ramo, telent, email, situacao,
-       rca, nome_rca1, rca2, nome_rca2, rca3, nome_rca3, rca4, nome_rca4,
-       rca5, nome_rca5, rca6, nome_rca6, rca7, nome_rca7
-FROM view_clientes
-WHERE dtultcomp >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
-   OR (dtultcomp IS NULL AND dtcadastro >= DATE_SUB(CURDATE(), INTERVAL 365 DAY))
-ORDER BY codcli
+       ramo, telent, email, situacao, rca, nome_rca
+FROM view_rca_cliente
+WHERE LOWER(TRIM(situacao)) = 'ativo'
+ORDER BY codcli, rca
 "@
 
     $reader = $command.ExecuteReader()
@@ -52,30 +49,26 @@ ORDER BY codcli
             situacao = 'ATIVO'
         }
 
-        for ($routeIndex = 1; $routeIndex -le 7; $routeIndex++) {
-            $routeColumn = if ($routeIndex -eq 1) { 'rca' } else { "rca$routeIndex" }
-            $nameColumn = "nome_rca$routeIndex"
-            $routeCode = Get-TextValue $reader $routeColumn
-            if ([string]::IsNullOrWhiteSpace($routeCode)) { continue }
+        $routeCode = Get-TextValue $reader 'rca'
+        if ([string]::IsNullOrWhiteSpace($routeCode)) { continue }
 
-            $rows.Add([pscustomobject]@{
-                codcli = $shared.codcli
-                razao_social = $shared.razao_social
-                nome_fantasia = $shared.nome_fantasia
-                cnpj = $shared.cnpj
-                tipo_fj = $shared.tipo_fj
-                endereco = $shared.endereco
-                bairro = $shared.bairro
-                cidade = $shared.cidade
-                uf = $shared.uf
-                ramo_atividade = $shared.ramo_atividade
-                telefone = $shared.telefone
-                email = $shared.email
-                situacao = $shared.situacao
-                cod_rca = $routeCode
-                nome_rca = Get-TextValue $reader $nameColumn
-            })
-        }
+        $rows.Add([pscustomobject]@{
+            codcli = $shared.codcli
+            razao_social = $shared.razao_social
+            nome_fantasia = $shared.nome_fantasia
+            cnpj = $shared.cnpj
+            tipo_fj = $shared.tipo_fj
+            endereco = $shared.endereco
+            bairro = $shared.bairro
+            cidade = $shared.cidade
+            uf = $shared.uf
+            ramo_atividade = $shared.ramo_atividade
+            telefone = $shared.telefone
+            email = $shared.email
+            situacao = $shared.situacao
+            cod_rca = $routeCode
+            nome_rca = Get-TextValue $reader 'nome_rca'
+        })
     }
 
     $targetDirectory = Split-Path -Parent $OutputPath
