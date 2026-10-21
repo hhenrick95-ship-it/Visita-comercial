@@ -35,6 +35,23 @@ export interface PortfolioPreview {
   errors: string[];
 }
 
+export interface PortfolioImportResult {
+  clients: number;
+  links: number;
+  vendorsUpdated: number;
+}
+
+interface ExistingClient {
+  codcli: number;
+  nome_fantasia: string | null;
+  ramo_atividade: string | null;
+  telefone: string | null;
+  email: string | null;
+  qtd_checkouts: number | null;
+  fotos: string[] | null;
+  status_atualizacao: string | null;
+}
+
 const text = (v: unknown): string | null => {
   const s = v === undefined || v === null ? "" : String(v).trim();
   return s ? s : null;
@@ -100,28 +117,119 @@ export const readPortfolioFile = async (file: File): Promise<PortfolioPreview> =
   return { rows, newClients: codclis.filter((c) => !existing.has(c)).length, byRca, errors };
 };
 
-export const importPortfolio = async (rows: PortfolioRow[]) => {
+export const importPortfolio = async (rows: PortfolioRow[]): Promise<PortfolioImportResult> => {
   const BATCH = 500;
 
-  // 1) Clientes novos (ignora os que já existem para não sobrescrever dados atualizados)
+  // Uma linha representa um vínculo cliente x RCA. Remove duplicatas da planilha.
+  const uniqueLinks = new Map<string, PortfolioRow>();
+  rows.forEach((row) => uniqueLinks.set(`${row.codcli}|${row.cod_rca}`, row));
+  const normalizedRows = [...uniqueLinks.values()];
+
+  // A primeira ocorrência do cliente é a rota principal informada pelo ERP.
   const clients = new Map<number, PortfolioRow>();
-  rows.forEach((r) => !clients.has(r.codcli) && clients.set(r.codcli, r));
-  const clientRows = [...clients.values()].map(({ codcli, razao_social, nome_fantasia, cnpj, tipo_fj, endereco, bairro, cidade, uf, ramo_atividade, telefone, email, situacao, cod_rca, nome_rca }) => ({
-    codcli, razao_social, nome_fantasia, cnpj, tipo_fj, endereco, bairro, cidade, uf, ramo_atividade, telefone, email, situacao, cod_rca, nome_rca,
-  }));
+  normalizedRows.forEach((row) => !clients.has(row.codcli) && clients.set(row.codcli, row));
+
+  // Lê o estado atual para preservar respostas coletadas em campo e fotos.
+  const existing = new Map<number, ExistingClient>();
+  const clientCodes = [...clients.keys()];
+  for (let i = 0; i < clientCodes.length; i += BATCH) {
+    const { data, error } = await supabase
+      .from("clientes_cadastro")
+      .select("codcli,nome_fantasia,ramo_atividade,telefone,email,qtd_checkouts,fotos,status_atualizacao")
+      .in("codcli", clientCodes.slice(i, i + BATCH));
+    if (error) throw error;
+    (data || []).forEach((client) => existing.set(Number(client.codcli), client as ExistingClient));
+  }
+
+  const clientRows = [...clients.values()].map((source) => {
+    const current = existing.get(source.codcli);
+    const preserveSurvey = current?.status_atualizacao === "atualizado";
+    return {
+      codcli: source.codcli,
+      razao_social: source.razao_social,
+      nome_fantasia: preserveSurvey ? current.nome_fantasia : source.nome_fantasia,
+      cnpj: source.cnpj,
+      tipo_fj: source.tipo_fj,
+      endereco: source.endereco,
+      bairro: source.bairro,
+      cidade: source.cidade,
+      uf: source.uf,
+      ramo_atividade: preserveSurvey ? current.ramo_atividade : source.ramo_atividade,
+      telefone: preserveSurvey ? current.telefone : source.telefone,
+      email: preserveSurvey ? current.email : source.email,
+      situacao: source.situacao,
+      cod_rca: source.cod_rca,
+      nome_rca: source.nome_rca,
+      qtd_checkouts: current?.qtd_checkouts ?? null,
+      fotos: current?.fotos ?? [],
+      status_atualizacao: current?.status_atualizacao || "pendente",
+    };
+  });
+
+  // 1) Atualiza os dados-base. O que já foi coletado em campo é preservado.
   for (let i = 0; i < clientRows.length; i += BATCH) {
     const { error } = await supabase
       .from("clientes_cadastro")
-      .upsert(clientRows.slice(i, i + BATCH), { onConflict: "codcli", ignoreDuplicates: true });
+      .upsert(clientRows.slice(i, i + BATCH), { onConflict: "codcli" });
     if (error) throw error;
   }
 
-  // 2) Vínculos cliente <-> RCA
-  const links = rows.map((r) => ({ codcli: r.codcli, cod_rca: r.cod_rca, nome_rca: r.nome_rca }));
-  for (let i = 0; i < links.length; i += BATCH) {
-    const { error } = await supabase
+  // 2) Sincroniza a carteira. Primeiro grava os vínculos atuais; só depois remove os antigos.
+  const links = normalizedRows.map((row) => ({
+    codcli: row.codcli,
+    cod_rca: row.cod_rca,
+    nome_rca: row.nome_rca,
+  }));
+  for (let i = 0; i < clientCodes.length; i += BATCH) {
+    const codes = clientCodes.slice(i, i + BATCH);
+    const codesInBatch = new Set(codes);
+    const batchLinks = links.filter((link) => codesInBatch.has(link.codcli));
+    const { error: upsertError } = await supabase
       .from("clientes_cadastro_rcas")
-      .upsert(links.slice(i, i + BATCH), { onConflict: "codcli,cod_rca", ignoreDuplicates: true });
-    if (error) throw error;
+      .upsert(batchLinks, { onConflict: "codcli,cod_rca" });
+    if (upsertError) throw upsertError;
+
+    const { data: storedLinks, error: listError } = await supabase
+      .from("clientes_cadastro_rcas")
+      .select("id,codcli,cod_rca")
+      .in("codcli", codes);
+    if (listError) throw listError;
+
+    const desired = new Set(batchLinks.map((link) => `${link.codcli}|${link.cod_rca}`));
+    const staleIds = (storedLinks || [])
+      .filter((link) => !desired.has(`${link.codcli}|${link.cod_rca}`))
+      .map((link) => link.id);
+    for (let staleIndex = 0; staleIndex < staleIds.length; staleIndex += BATCH) {
+      const { error: deleteError } = await supabase
+        .from("clientes_cadastro_rcas")
+        .delete()
+        .in("id", staleIds.slice(staleIndex, staleIndex + BATCH));
+      if (deleteError) throw deleteError;
+    }
   }
+
+  // 3) Atualiza nomes dos vendedores já cadastrados na gestão de equipes.
+  const vendors = new Map<string, string>();
+  normalizedRows.forEach((row) => {
+    if (row.nome_rca) vendors.set(row.cod_rca, row.nome_rca);
+  });
+  const vendorEntries = [...vendors.entries()];
+  for (let i = 0; i < vendorEntries.length; i += 10) {
+    await Promise.all(
+      vendorEntries.slice(i, i + 10).map(async ([code, name]) => {
+        const { error } = await supabase
+          .from("teams_vendors")
+          .update({ nome_rca: name })
+          .eq("cod_rca_lopes", code)
+          .eq("cargo", "vendedor");
+        if (error) throw error;
+      })
+    );
+  }
+
+  return {
+    clients: clientRows.length,
+    links: links.length,
+    vendorsUpdated: vendorEntries.length,
+  };
 };

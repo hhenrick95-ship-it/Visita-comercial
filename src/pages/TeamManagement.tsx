@@ -376,9 +376,12 @@ export default function TeamManagement() {
     if (!portfolioPreview) return;
     setImportingPortfolio(true);
     try {
-      await importPortfolio(portfolioPreview.rows);
-      toast.success(`Carteira importada: ${portfolioPreview.rows.length} vínculo(s) cliente x RCA.`);
+      const result = await importPortfolio(portfolioPreview.rows);
+      toast.success("Carteira sincronizada com sucesso", {
+        description: `${result.clients} clientes · ${result.links} vínculos cliente x RCA · vendedores atualizados`,
+      });
       setPortfolioPreview(null);
+      loadTeams();
     } catch (error: any) {
       toast.error("Erro ao importar carteira: " + error.message);
     } finally {
@@ -637,7 +640,7 @@ export default function TeamManagement() {
                 <Button variant="outline" className="gap-2 glass-card border-0" asChild disabled={importingPortfolio}>
                   <span>
                     <Upload className="h-4 w-4" />
-                    {importingPortfolio ? "Lendo carteira..." : "Importar carteira de clientes"}
+                    {importingPortfolio ? "Lendo carteira..." : "Sincronizar carteira de clientes"}
                   </span>
                 </Button>
               </label>
@@ -1232,10 +1235,10 @@ export default function TeamManagement() {
         >
           <AlertDialogContent className="max-w-lg">
             <AlertDialogHeader>
-              <AlertDialogTitle>Importar carteira de clientes</AlertDialogTitle>
+              <AlertDialogTitle>Sincronizar carteira de clientes</AlertDialogTitle>
               <AlertDialogDescription>
                 {portfolioPreview &&
-                  `${portfolioPreview.rows.length} vínculo(s) cliente x RCA, sendo ${portfolioPreview.newClients} cliente(s) novo(s) na base. Clientes que já existem não terão os dados alterados.`}
+                  `${portfolioPreview.rows.length} vínculo(s) cliente x RCA, sendo ${portfolioPreview.newClients} cliente(s) novo(s). A carteira e os nomes dos vendedores serão atualizados conforme o ERP. Dados já coletados em campo e fotos serão preservados.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
             {portfolioPreview && (
@@ -1267,7 +1270,7 @@ export default function TeamManagement() {
                   handleConfirmPortfolio();
                 }}
               >
-                {importingPortfolio ? "Importando..." : "Importar"}
+                {importingPortfolio ? "Sincronizando..." : "Sincronizar"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
