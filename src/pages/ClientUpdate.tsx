@@ -70,6 +70,7 @@ export default function ClientUpdate() {
           .select(
             "codcli,razao_social,nome_fantasia,cnpj,cidade,uf,cod_rca,nome_rca,ramo_atividade,qtd_checkouts,telefone,email,status_atualizacao,fotos"
           )
+          .eq("situacao", "ATIVO")
           .order("razao_social", { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;

@@ -38,6 +38,9 @@ export interface PortfolioPreview {
 export interface PortfolioImportResult {
   clients: number;
   links: number;
+  linksRemoved: number;
+  clientsRemoved: number;
+  clientsArchived: number;
   vendorsUpdated: number;
 }
 
@@ -174,41 +177,105 @@ export const importPortfolio = async (rows: PortfolioRow[]): Promise<PortfolioIm
     if (error) throw error;
   }
 
-  // 2) Sincroniza a carteira. Primeiro grava os vínculos atuais; só depois remove os antigos.
+  // 2) Sincroniza a carteira completa. Primeiro grava os vínculos atuais;
+  // só depois remove qualquer vínculo que não esteja mais no arquivo.
   const links = normalizedRows.map((row) => ({
     codcli: row.codcli,
     cod_rca: row.cod_rca,
     nome_rca: row.nome_rca,
   }));
-  for (let i = 0; i < clientCodes.length; i += BATCH) {
-    const codes = clientCodes.slice(i, i + BATCH);
-    const codesInBatch = new Set(codes);
-    const batchLinks = links.filter((link) => codesInBatch.has(link.codcli));
+  for (let i = 0; i < links.length; i += BATCH) {
+    const batchLinks = links.slice(i, i + BATCH);
     const { error: upsertError } = await supabase
       .from("clientes_cadastro_rcas")
       .upsert(batchLinks, { onConflict: "codcli,cod_rca" });
     if (upsertError) throw upsertError;
+  }
 
+  const desiredLinks = new Set(links.map((link) => `${link.codcli}|${link.cod_rca}`));
+  const staleIds: string[] = [];
+  for (let from = 0; ; from += 1000) {
     const { data: storedLinks, error: listError } = await supabase
       .from("clientes_cadastro_rcas")
       .select("id,codcli,cod_rca")
-      .in("codcli", codes);
+      .range(from, from + 999);
     if (listError) throw listError;
+    (storedLinks || []).forEach((link) => {
+      if (!desiredLinks.has(`${link.codcli}|${link.cod_rca}`)) staleIds.push(link.id);
+    });
+    if (!storedLinks || storedLinks.length < 1000) break;
+  }
+  for (let i = 0; i < staleIds.length; i += BATCH) {
+    const { error: deleteError } = await supabase
+      .from("clientes_cadastro_rcas")
+      .delete()
+      .in("id", staleIds.slice(i, i + BATCH));
+    if (deleteError) throw deleteError;
+  }
 
-    const desired = new Set(batchLinks.map((link) => `${link.codcli}|${link.cod_rca}`));
-    const staleIds = (storedLinks || [])
-      .filter((link) => !desired.has(`${link.codcli}|${link.cod_rca}`))
-      .map((link) => link.id);
-    for (let staleIndex = 0; staleIndex < staleIds.length; staleIndex += BATCH) {
-      const { error: deleteError } = await supabase
-        .from("clientes_cadastro_rcas")
+  // 3) Retira da lista operacional os clientes que não estão na carteira.
+  // Registros sem coleta podem ser excluídos. Se houver histórico ou fotos,
+  // o registro é apenas arquivado para nunca perder informação de campo.
+  const currentClientCodes = new Set(clientCodes);
+  const inactiveClients: Array<{
+    codcli: number;
+    status_atualizacao: string | null;
+    fotos: string[] | null;
+  }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("clientes_cadastro")
+      .select("codcli,status_atualizacao,fotos")
+      .range(from, from + 999);
+    if (error) throw error;
+    (data || []).forEach((client) => {
+      if (!currentClientCodes.has(Number(client.codcli))) inactiveClients.push(client);
+    });
+    if (!data || data.length < 1000) break;
+  }
+
+  let clientsRemoved = 0;
+  let clientsArchived = 0;
+  for (let i = 0; i < inactiveClients.length; i += BATCH) {
+    const batch = inactiveClients.slice(i, i + BATCH);
+    const codes = batch.map((client) => client.codcli);
+    const { data: history, error: historyError } = await supabase
+      .from("clientes_cadastro_historico")
+      .select("cliente_codcli")
+      .in("cliente_codcli", codes);
+    if (historyError) throw historyError;
+    const withHistory = new Set((history || []).map((item) => Number(item.cliente_codcli)));
+    const removable = batch
+      .filter(
+        (client) =>
+          client.status_atualizacao !== "atualizado" &&
+          (!client.fotos || client.fotos.length === 0) &&
+          !withHistory.has(client.codcli)
+      )
+      .map((client) => client.codcli);
+    const protectedCodes = batch
+      .filter((client) => !removable.includes(client.codcli))
+      .map((client) => client.codcli);
+
+    if (removable.length > 0) {
+      const { error: removeError } = await supabase
+        .from("clientes_cadastro")
         .delete()
-        .in("id", staleIds.slice(staleIndex, staleIndex + BATCH));
-      if (deleteError) throw deleteError;
+        .in("codcli", removable);
+      if (removeError) throw removeError;
+      clientsRemoved += removable.length;
+    }
+    if (protectedCodes.length > 0) {
+      const { error: archiveError } = await supabase
+        .from("clientes_cadastro")
+        .update({ situacao: "INATIVO", cod_rca: null, nome_rca: null })
+        .in("codcli", protectedCodes);
+      if (archiveError) throw archiveError;
+      clientsArchived += protectedCodes.length;
     }
   }
 
-  // 3) Atualiza nomes dos vendedores já cadastrados na gestão de equipes.
+  // 4) Atualiza nomes dos vendedores já cadastrados na gestão de equipes.
   const vendors = new Map<string, string>();
   normalizedRows.forEach((row) => {
     if (row.nome_rca) vendors.set(row.cod_rca, row.nome_rca);
@@ -230,6 +297,9 @@ export const importPortfolio = async (rows: PortfolioRow[]): Promise<PortfolioIm
   return {
     clients: clientRows.length,
     links: links.length,
+    linksRemoved: staleIds.length,
+    clientsRemoved,
+    clientsArchived,
     vendorsUpdated: vendorEntries.length,
   };
 };

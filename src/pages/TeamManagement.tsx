@@ -378,7 +378,7 @@ export default function TeamManagement() {
     try {
       const result = await importPortfolio(portfolioPreview.rows);
       toast.success("Carteira sincronizada com sucesso", {
-        description: `${result.clients} clientes · ${result.links} vínculos cliente x RCA · vendedores atualizados`,
+        description: `${result.clients} clientes ativos · ${result.clientsRemoved} inativos removidos · ${result.clientsArchived} registros com pesquisa arquivados`,
       });
       setPortfolioPreview(null);
       loadTeams();
@@ -1238,7 +1238,7 @@ export default function TeamManagement() {
               <AlertDialogTitle>Sincronizar carteira de clientes</AlertDialogTitle>
               <AlertDialogDescription>
                 {portfolioPreview &&
-                  `${portfolioPreview.rows.length} vínculo(s) cliente x RCA, sendo ${portfolioPreview.newClients} cliente(s) novo(s). A carteira e os nomes dos vendedores serão atualizados conforme o ERP. Dados já coletados em campo e fotos serão preservados.`}
+                  `${portfolioPreview.rows.length} vínculo(s) ativo(s) cliente x RCA, sendo ${portfolioPreview.newClients} cliente(s) novo(s). O arquivo substituirá a carteira atual: vínculos ausentes serão removidos. Dados já coletados em campo e fotos serão preservados.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
             {portfolioPreview && (

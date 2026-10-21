@@ -27,6 +27,8 @@ SELECT codcli, cliente, fantasia, cgcent, tipofj, endereco, bairro, cidade, esta
        rca, nome_rca1, rca2, nome_rca2, rca3, nome_rca3, rca4, nome_rca4,
        rca5, nome_rca5, rca6, nome_rca6, rca7, nome_rca7
 FROM view_clientes
+WHERE dtultcomp >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+   OR (dtultcomp IS NULL AND dtcadastro >= DATE_SUB(CURDATE(), INTERVAL 365 DAY))
 ORDER BY codcli
 "@
 
@@ -47,7 +49,7 @@ ORDER BY codcli
             ramo_atividade = Get-TextValue $reader 'ramo'
             telefone = Get-TextValue $reader 'telent'
             email = Get-TextValue $reader 'email'
-            situacao = Get-TextValue $reader 'situacao'
+            situacao = 'ATIVO'
         }
 
         for ($routeIndex = 1; $routeIndex -le 7; $routeIndex++) {
