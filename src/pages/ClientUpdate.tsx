@@ -177,8 +177,18 @@ export default function ClientUpdate() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      await exportClientUpdatesXLSX(rcaFilter !== "__all__" ? rcaFilter : null);
-      toast.success("Exportação concluída");
+      const result = await exportClientUpdatesXLSX(
+        rcaFilter !== "__all__" ? rcaFilter : null
+      );
+      if (result.failedPhotos > 0) {
+        toast.warning("Planilha exportada, mas algumas fotos não puderam ser baixadas", {
+          description: `${result.records} registros · ${result.photos} fotos incluídas · ${result.failedPhotos} fotos com falha`,
+        });
+      } else {
+        toast.success("Planilha e fotos exportadas", {
+          description: `${result.records} registros · ${result.photos} fotos incluídas`,
+        });
+      }
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || "Erro ao exportar");
@@ -210,7 +220,7 @@ export default function ClientUpdate() {
               ) : (
                 <Download className="h-4 w-4 mr-2" />
               )}
-              Exportar Atualizações
+              Exportar Planilha + Fotos
             </Button>
           </div>
         </div>
