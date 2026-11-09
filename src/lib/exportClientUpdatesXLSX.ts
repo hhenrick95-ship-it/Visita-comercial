@@ -43,8 +43,12 @@ function extractStoragePath(value: string): string {
 }
 
 function safeFileName(value: string): string {
-  return value
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
+  const withoutControlCharacters = Array.from(value, (character) =>
+    character.charCodeAt(0) < 32 ? "-" : character
+  ).join("");
+
+  return withoutControlCharacters
+    .replace(/[<>:"/\\|?*]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
