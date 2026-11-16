@@ -28,10 +28,6 @@ const normalizeText = (value: unknown) => String(value ?? "")
   .replace(/[\u0300-\u036f]/g, "")
   .toLocaleLowerCase("pt-BR");
 
-const normalizeEntityKey = (value: unknown) => normalizeText(value)
-  .replace(/[^a-z0-9]+/g, " ")
-  .trim();
-
 const identifyPexNetwork = (value: unknown): Exclude<PexNetwork, "all"> | "Outras" => {
   const normalized = normalizeText(value);
   if (/(^|\W)db(\W|$)/i.test(normalized)) return "DB";
@@ -266,15 +262,14 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     if (!isPexJbp || !pexAssessmentQuestions.length) return [];
     const grouped = new Map<string, typeof perSub>();
     perSub.forEach(item => {
-      const storeKey = normalizeEntityKey(item.store);
-      if (!storeKey) return;
-      const groupKey = `${item.network}|${storeKey}`;
-      grouped.set(groupKey, [...(grouped.get(groupKey) || []), item]);
+      if (item.network === "Outras") return;
+      grouped.set(item.network, [...(grouped.get(item.network) || []), item]);
     });
 
     const rows: {
       network: string;
-      store: string;
+      previousStore: string;
+      currentStore: string;
       question: string;
       section: string;
       previous: string;
@@ -312,7 +307,8 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
 
         rows.push({
           network: currentVisit.network,
-          store: currentVisit.store,
+          previousStore: previousVisit.store,
+          currentStore: currentVisit.store,
           question: question.label,
           section: question.section,
           previous: displayPexAnswer(previous),
@@ -329,7 +325,6 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     return rows.sort((a, b) =>
       priority[a.status] - priority[b.status] ||
       a.network.localeCompare(b.network, "pt-BR") ||
-      a.store.localeCompare(b.store, "pt-BR") ||
       a.question.localeCompare(b.question, "pt-BR"),
     );
   }, [bySub, isPexJbp, perSub, pexAssessmentQuestions]);
@@ -373,7 +368,8 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     if (isPexJbp && evolutionRows.length) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(evolutionRows.map(row => ({
         Rede: row.network,
-        Loja: row.store,
+        "Loja anterior": row.previousStore,
+        "Loja atual": row.currentStore,
         Seção: row.section,
         "Ponto avaliado": row.question,
         "Data anterior": formatDateOnlyPtBR(row.previousDate),
@@ -398,7 +394,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     if (isPexJbp) {
       line(`Rede: ${pexNetwork === "all" ? "Todas" : pexNetwork}`, 10, true);
       line(`Evolução: ${evolutionCounts.positive} melhorado(s)/resolvido(s), ${evolutionCounts.pending} pendente(s), ${evolutionCounts.worsened} piora(s).`);
-      evolutionRows.forEach(row => line(`- ${row.network} · ${row.store} · ${row.question}: ${row.previous} -> ${row.current} (${evolutionLabel[row.status]})`, 8));
+      evolutionRows.forEach(row => line(`- ${row.network} · ${row.previousStore} -> ${row.currentStore} · ${row.question}: ${row.previous} -> ${row.current} (${evolutionLabel[row.status]})`, 8));
       y += 3;
     }
     if (best.length) { line("Pontos fortes", 11, true); best.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
@@ -464,7 +460,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2"><GitCompareArrows className="h-5 w-5 text-primary" />Evolução entre visitas</CardTitle>
                 <CardDescription>
-                  Compara as duas visitas mais recentes de cada loja. Não = ruim, Parcial = atenção e Sim = bom. Pontos que permaneceram em Sim não aparecem abaixo.
+                  Compara as duas visitas mais recentes de cada rede, mesmo quando ocorreram em lojas diferentes. Não = ruim, Parcial = atenção e Sim = bom. Pontos que permaneceram em Sim não aparecem abaixo.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -487,7 +483,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
                   <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
                     {submissionIds.length === 0
                       ? "Nenhuma visita encontrada para esta rede."
-                      : "Ainda não há duas visitas identificadas para a mesma Rede + Loja neste filtro."}
+                      : "Ainda não há duas visitas identificadas para a mesma rede neste filtro."}
                   </div>
                 ) : (
                   <div className="max-h-[34rem] overflow-auto rounded-lg border">
@@ -495,7 +491,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
                       <thead className="sticky top-0 bg-muted/95 backdrop-blur">
                         <tr className="border-b text-left">
                           <th className="p-3 font-medium">Rede</th>
-                          <th className="p-3 font-medium">Loja</th>
+                          <th className="p-3 font-medium">Lojas comparadas</th>
                           <th className="p-3 font-medium">Ponto avaliado</th>
                           <th className="p-3 font-medium">Anterior</th>
                           <th className="p-3 font-medium">Atual</th>
@@ -507,7 +503,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
                         {evolutionRows.map((row, index) => (
                           <tr key={`${row.currentSubmissionId}-${row.question}-${index}`} className="border-b last:border-0 align-top">
                             <td className="p-3 font-medium">{row.network}</td>
-                            <td className="p-3">{row.store}</td>
+                            <td className="p-3"><span className="block">Anterior: {row.previousStore}</span><span className="mt-1 block">Atual: {row.currentStore}</span></td>
                             <td className="p-3"><span className="font-medium">{row.question}</span><span className="mt-1 block text-xs text-muted-foreground">{row.section}</span></td>
                             <td className="p-3">{row.previous}<span className="mt-1 block text-xs text-muted-foreground">{formatDateOnlyPtBR(row.previousDate)}</span></td>
                             <td className="p-3">{row.current}<span className="mt-1 block text-xs text-muted-foreground">{formatDateOnlyPtBR(row.currentDate)}</span></td>
@@ -518,7 +514,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
                                 "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
                               }`}>{evolutionLabel[row.status]}</span>
                             </td>
-                            <td className="p-3"><Button size="sm" variant="outline" onClick={() => drill(`${row.network} · ${row.store}`, [row.currentSubmissionId])}>Ver visita</Button></td>
+                            <td className="p-3"><Button size="sm" variant="outline" onClick={() => drill(`${row.network} · ${row.currentStore}`, [row.currentSubmissionId])}>Ver visita</Button></td>
                           </tr>
                         ))}
                       </tbody>
