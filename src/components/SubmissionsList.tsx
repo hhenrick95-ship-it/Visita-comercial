@@ -8,7 +8,13 @@ import type { FormTemplate } from "@/hooks/useFormTemplates";
 import { generateGenericFormPDF } from "@/lib/generateGenericFormPDF";
 import { toast } from "sonner";
 import { formatDateOnlyPtBR } from "@/lib/utils";
+import { calendarDateToLocal } from "@/lib/formDate";
+import { matchesSubmissionFilters } from "@/lib/submissionFilters";
+import { DateTreeFilter } from "@/components/ui/date-tree-filter";
+import { Combobox } from "@/components/ui/combobox";
+import { SubmissionDatePicker } from "@/components/SubmissionDatePicker";
 import { supabase } from "@/integrations/supabase/client";
+import { SubmissionsDashboard, type Drill } from "@/components/SubmissionsDashboard";
 import { AIInsightsPanel } from "@/components/AIInsightsPanel";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -39,16 +45,51 @@ export function SubmissionsList({ template }: Props) {
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [years, setYears] = useState<string[]>([]);
+  const [months, setMonths] = useState<string[]>([]);
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [drill, setDrill] = useState<Drill | null>(null);
+
+  const clearFilters = () => {
+    setSearch(""); setYears([]); setMonths([]); setCollaborators([]); setStart(""); setEnd(""); setDrill(null);
+  };
+
+  useEffect(() => {
+    clearFilters();
+    setPreviewId(null);
+  }, [template.id]);
+
+  useEffect(() => {
+    let active = true;
+    const ids = [...new Set(submissions.map(s => s.created_by).filter((id): id is string => Boolean(id)))];
+    setNames({});
+    if (!ids.length) return;
+    supabase.from("profiles").select("id, full_name, email").in("id", ids).then(({ data, error }) => {
+      if (!active) return;
+      if (error) { toast.error("Não foi possível carregar os nomes dos colaboradores."); return; }
+      setNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name || p.email])));
+    });
+    return () => { active = false; };
+  }, [submissions]);
+
+  const collaboratorOptions = useMemo(() => [...new Set(submissions.map(s => s.created_by || "unknown"))]
+    .map(id => ({ value: id, label: names[id] || (id === "unknown" ? "Sem colaborador" : `Colaborador (${id.slice(0, 8)})`) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR")), [submissions, names]);
 
   const filtered = useMemo(() => {
-    if (!search) return submissions;
-    const t = search.toLowerCase();
-    return submissions.filter(
-      (s) =>
-        s.address?.toLowerCase().includes(t) ||
-        Object.values(s.metadata || {}).some((v) => String(v).toLowerCase().includes(t))
-    );
-  }, [submissions, search]);
+    return submissions.filter(s => matchesSubmissionFilters(s, { years, months, collaborators, start, end, search }, names[s.created_by || ""]));
+  }, [submissions, search, years, months, collaborators, start, end, names]);
+
+  useEffect(() => { setDrill(null); }, [filtered]);
+
+  const listed = useMemo(() => {
+    if (!drill) return filtered;
+    const ids = new Set(drill.ids);
+    return filtered.filter(s => ids.has(s.id));
+  }, [filtered, drill]);
 
   const handlePdf = async (id: string) => {
     if (!template.generates_pdf) {
@@ -115,14 +156,14 @@ export function SubmissionsList({ template }: Props) {
         <Card className="glass-card border-0">
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Total de registros</p>
-            <p className="text-2xl font-bold">{submissions.length}</p>
+            <p className="text-2xl font-bold">{filtered.length}</p>
           </CardContent>
         </Card>
         <Card className="glass-card border-0">
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Com geolocalização</p>
             <p className="text-2xl font-bold">
-              {submissions.filter((s) => s.latitude && s.longitude).length}
+              {filtered.filter((s) => s.latitude && s.longitude).length}
             </p>
           </CardContent>
         </Card>
@@ -131,8 +172,8 @@ export function SubmissionsList({ template }: Props) {
             <p className="text-xs text-muted-foreground">Últimos 30 dias</p>
             <p className="text-2xl font-bold">
               {
-                submissions.filter((s) => {
-                  const d = new Date(s.submitted_at).getTime();
+                filtered.filter((s) => {
+                  const d = calendarDateToLocal(s.visit_date).getTime();
                   return d > Date.now() - 30 * 86400000;
                 }).length
               }
@@ -141,11 +182,29 @@ export function SubmissionsList({ template }: Props) {
         </Card>
       </div>
 
+      <section aria-label="Filtros de registros" className="space-y-4">
+        <h2 className="text-lg font-semibold">Filtros</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <DateTreeFilter availableDates={submissions.map(s => s.visit_date)} selectedYears={years} selectedMonths={months}
+            onSelectionChange={(nextYears, nextMonths) => { setYears(nextYears); setMonths(nextMonths); }} />
+          <div className="space-y-2 min-w-0">
+            <p className="text-sm font-medium">Colaborador</p>
+            <Combobox options={collaboratorOptions} multiple values={collaborators} onValuesChange={setCollaborators}
+              placeholder="Todos os colaboradores" searchPlaceholder="Buscar colaborador..." className="min-h-11" />
+          </div>
+          <SubmissionDatePicker label="Data inicial" value={start} onChange={setStart} to={end} />
+          <SubmissionDatePicker label="Data final" value={end} onChange={setEnd} from={start} />
+        </div>
+        <Button variant="outline" onClick={clearFilters} className="min-h-11">Limpar filtros</Button>
+      </section>
+
+      <SubmissionsDashboard templateId={template.id} templateName={template.name} submissions={filtered} names={names} onDrill={setDrill} />
+
       {/* Search */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar por endereço ou identificação..."
+          placeholder="Buscar por colaborador, endereço ou identificação..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-10"
@@ -153,22 +212,28 @@ export function SubmissionsList({ template }: Props) {
       </div>
 
       {/* List */}
-      <Card className="glass-card border-0">
+      <Card id="lista-registros" className="glass-card border-0 scroll-mt-4">
         <CardHeader>
+          {drill && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-primary/10 p-3 text-sm mb-2">
+              <span>Mostrando só: <b>{drill.label}</b></span>
+              <Button size="sm" variant="outline" className="min-h-11" onClick={() => setDrill(null)}>Ver todos</Button>
+            </div>
+          )}
           <CardTitle className="flex items-center gap-2 text-lg">
             <FileText className="h-5 w-5 text-primary" />
-            {filtered.length} registro(s)
+            {listed.length} registro(s)
           </CardTitle>
           <CardDescription>{template.description || template.name}</CardDescription>
         </CardHeader>
         <CardContent>
-          {filtered.length === 0 ? (
+          {listed.length === 0 ? (
             <p className="text-center py-8 text-muted-foreground">
               Nenhum registro encontrado.
             </p>
           ) : (
             <div className="space-y-3">
-              {filtered.map((s) => {
+              {listed.map((s) => {
                 const meta = Object.entries(s.metadata || {}).slice(0, 3);
                 const isOpen = previewId === s.id;
                 return (
@@ -184,8 +249,9 @@ export function SubmissionsList({ template }: Props) {
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-sm flex items-center gap-2">
                             <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                            {formatDateOnlyPtBR(s.submitted_at.substring(0, 10))}
+                            {formatDateOnlyPtBR(s.visit_date)}
                           </p>
+                          <p className="text-sm mt-1 break-words">{names[s.created_by || ""] || (s.created_by ? "Colaborador não identificado" : "Sem colaborador")}</p>
                           {meta.length > 0 && (
                             <p className="text-xs text-muted-foreground mt-1">
                               {meta.map(([k, v]) => `${k}: ${v}`).join(" • ")}
@@ -281,11 +347,11 @@ export function SubmissionsList({ template }: Props) {
 
       {/* IA específica para este template */}
       <AIInsightsPanel
-        filters={{}}
+        filters={{ submissionIds: filtered.map(s => s.id) } as any}
         templateId={template.id}
         templateName={template.name}
         contextualKPIs={{
-          totalVisits: submissions.length,
+          totalVisits: filtered.length,
           totalFeedbacks: 0,
           activeManagers: 0,
           periodDays: 30,

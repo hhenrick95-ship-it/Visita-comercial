@@ -16,9 +16,32 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  // Modo de recuperação: usuário chegou pelo link enviado por e-mail
+  const [recoveryMode, setRecoveryMode] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      (window.location.hash.includes("type=recovery") ||
+        sessionStorage.getItem("pwd_recovery") === "1")
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash.includes("type=recovery")) {
+      sessionStorage.setItem("pwd_recovery", "1");
+      setRecoveryMode(true);
+    }
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        sessionStorage.setItem("pwd_recovery", "1");
+        setRecoveryMode(true);
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   // Redirecionar quando autenticado
   useEffect(() => {
+    if (recoveryMode) return;
     if (!authLoading && user) {
       if (isApproved) {
         navigate("/", { replace: true });
@@ -26,7 +49,7 @@ export default function Auth() {
         navigate("/pending", { replace: true });
       }
     }
-  }, [user, isApproved, authLoading, navigate]);
+  }, [user, isApproved, authLoading, navigate, recoveryMode]);
 
   // Login state - 2 etapas
   const [loginEmail, setLoginEmail] = useState("");
@@ -101,6 +124,19 @@ export default function Auth() {
     
     setLoading(true);
     try {
+      // Fluxo do link de recuperação por e-mail: já existe sessão válida
+      if (recoveryMode) {
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) throw error;
+        sessionStorage.removeItem("pwd_recovery");
+        setRecoveryMode(false);
+        setNewPassword("");
+        setConfirmPassword("");
+        toast.success("Senha alterada com sucesso!");
+        navigate("/", { replace: true });
+        return;
+      }
+
       // Use edge function to reset password (admin function that bypasses auth)
       const { data, error } = await supabase.functions.invoke("reset-user-password", {
         body: { 
@@ -179,13 +215,63 @@ export default function Auth() {
               Sistema de Visitas
             </h1>
             <p className="text-sm text-muted-foreground">
-              {showForgotPassword
+              {recoveryMode
+                ? "Defina sua nova senha"
+                : showForgotPassword
                 ? "Digite seu email para recuperar a senha"
                 : "Faça login ou crie sua conta para continuar"}
             </p>
           </div>
           <div className="px-6 pb-8">
-            {showForgotPassword ? (
+            {recoveryMode ? (
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div className="p-3 bg-primary/10 border border-primary/30 rounded-md flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-primary" />
+                  <span className="text-sm">Crie uma nova senha para acessar o sistema</span>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="recovery-password">Nova Senha</Label>
+                  <Input
+                    id="recovery-password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="recovery-confirm">Confirmar Nova Senha</Label>
+                  <Input
+                    id="recovery-confirm"
+                    type="password"
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full bg-hero-gradient text-primary-foreground hover:opacity-90 hover:shadow-glow transition-all"
+                  disabled={loading}
+                >
+                  {loading ? "Salvando..." : "Salvar Nova Senha"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    sessionStorage.removeItem("pwd_recovery");
+                    setRecoveryMode(false);
+                  }}
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Voltar ao login
+                </Button>
+              </form>
+            ) : showForgotPassword ? (
               <form onSubmit={handleForgotPassword} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="forgot-email">Email</Label>

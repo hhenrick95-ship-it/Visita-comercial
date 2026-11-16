@@ -1,0 +1,358 @@
+import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "@e965/xlsx";
+import jsPDF from "jspdf";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { BarChart3, Loader2, TrendingUp, AlertTriangle, Store, PackageX, Map as MapIcon, FileSpreadsheet, FileDown, Lightbulb } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { formatDateOnlyPtBR } from "@/lib/utils";
+import { yesScore } from "@/lib/submissionScore";
+import { SubmissionsResultsMap, type MapPoint } from "@/components/SubmissionsResultsMap";
+
+interface Question { id: string; label: string; question_type: string; options: any; section: string; order: number }
+export interface DashSubmission { id: string; visit_date: string; created_by: string | null; latitude: number | null; longitude: number | null; address: string | null; metadata: any }
+export interface Drill { label: string; ids: string[] }
+interface Props { templateId: string; templateName: string; submissions: DashSubmission[]; names: Record<string, string>; onDrill: (d: Drill | null) => void }
+
+const CHOICE = ["radio", "select", "multi_select", "checkbox"];
+const NUMERIC = ["slider", "scale", "rating", "number"];
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+const asList = (v: any) => (Array.isArray(v) ? v : [v]).map(norm);
+
+function Bar({ label, value, total, tone = "primary", onClick }: { label: string; value: number; total: number; tone?: "primary" | "destructive" | "success"; onClick?: () => void }) {
+  const pct = total ? Math.round((value / total) * 100) : 0;
+  const color = tone === "destructive" ? "bg-destructive" : tone === "success" ? "bg-success" : "bg-primary";
+  const body = (
+    <>
+      <div className="flex justify-between gap-2 text-sm"><span className="truncate text-left">{label}</span><span className="font-semibold shrink-0">{pct}% <span className="text-muted-foreground font-normal">({value})</span></span></div>
+      <div className="h-2 rounded-full bg-muted overflow-hidden"><div className={`h-full ${color}`} style={{ width: `${pct}%` }} /></div>
+    </>
+  );
+  return onClick
+    ? <button type="button" onClick={onClick} className="w-full space-y-1 rounded-md p-1 -m-1 hover:bg-muted/50 transition-colors min-h-11">{body}</button>
+    : <div className="space-y-1">{body}</div>;
+}
+
+export function SubmissionsDashboard({ templateId, templateName, submissions, names, onDrill }: Props) {
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [responses, setResponses] = useState<{ submission_id: string; question_id: string; response_value: any }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const submissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase.from("form_sections")
+        .select("title, display_order, form_questions(id,label,question_type,options,display_order,is_active)")
+        .eq("template_id", templateId).order("display_order");
+      if (!active) return;
+      const qs: Question[] = [];
+      (data || []).forEach((s: any) => (s.form_questions || []).filter((q: any) => q.is_active !== false)
+        .forEach((q: any) => qs.push({ ...q, section: s.title, order: s.display_order * 1000 + q.display_order })));
+      setQuestions(qs.sort((a, b) => a.order - b.order));
+    })();
+    return () => { active = false; };
+  }, [templateId]);
+
+  const key = submissionIds.join(",");
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    (async () => {
+      const all: any[] = [];
+      for (let i = 0; i < submissionIds.length; i += 100) {
+        const { data } = await supabase.from("form_responses").select("submission_id, question_id, response_value")
+          .in("submission_id", submissionIds.slice(i, i + 100));
+        all.push(...(data || []));
+      }
+      if (active) { setResponses(all); setLoading(false); }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const qMap = useMemo(() => new Map(questions.map(q => [q.id, q])), [questions]);
+  const isYesNo = (q?: Question) => !!q && Array.isArray(q.options) && q.options.some((o: any) => norm(o.value ?? o) === "sim") && q.options.some((o: any) => norm(o.value ?? o) === "nao");
+
+  /** respostas por registro */
+  const bySub = useMemo(() => {
+    const m = new Map<string, Map<string, any>>();
+    responses.forEach(r => { if (!m.has(r.submission_id)) m.set(r.submission_id, new Map()); m.get(r.submission_id)!.set(r.question_id, r.response_value); });
+    return m;
+  }, [responses]);
+
+  const clientQ = useMemo(() => questions.find(q => /rede|cliente/i.test(q.label) && !CHOICE.includes(q.question_type) && !NUMERIC.includes(q.question_type)), [questions]);
+
+  const perSub = useMemo(() => submissions.map(s => {
+    const ans = bySub.get(s.id) || new Map();
+    const score = yesScore([...ans.entries()].map(([qid, v]) => ({ value: v, yesNo: isYesNo(qMap.get(qid)) })));
+    const noCount = [...ans.entries()].filter(([qid, v]) => isYesNo(qMap.get(qid)) && norm(v) === "nao").length;
+    const md = s.metadata || {};
+    const rawClient = (clientQ && ans.get(clientQ.id)) || md.client_data?.nome_fantasia || md.client || md.cliente || "";
+    const client = String(typeof rawClient === "object" ? JSON.stringify(rawClient) : rawClient).trim() || "Não informado";
+    return { s, score, noCount, client, who: names[s.created_by || ""] || "Sem colaborador" };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [submissions, bySub, qMap, clientQ, names]);
+
+  const stats = useMemo(() => questions.map(q => {
+    const entries = submissionIds.map(id => [id, bySub.get(id)?.get(q.id)] as const).filter(([, v]) => v !== undefined && v !== null && v !== "");
+    if (CHOICE.includes(q.question_type) && Array.isArray(q.options)) {
+      const opts = q.options.map((o: any) => {
+        const value = norm(o.value ?? o);
+        const ids = entries.filter(([, v]) => asList(v).includes(value)).map(([id]) => id);
+        return { label: o.label ?? String(o), value, count: ids.length, ids };
+      });
+      return { q, kind: "choice" as const, answered: entries.length, opts, yesNo: isYesNo(q), multi: q.question_type === "multi_select" };
+    }
+    if (NUMERIC.includes(q.question_type)) {
+      const nums = entries.map(([, v]) => Number(v)).filter(n => !isNaN(n));
+      return { q, kind: "num" as const, answered: nums.length, avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0 };
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }).filter(Boolean) as any[], [questions, bySub, key]);
+
+  const ranking = useMemo(() => {
+    const c = new Map<string, string[]>();
+    perSub.forEach(p => c.set(p.who, [...(c.get(p.who) || []), p.s.id]));
+    return [...c.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [perSub]);
+
+  const clients = useMemo(() => {
+    const c = new Map<string, { ids: string[]; no: number; scores: number[] }>();
+    perSub.forEach(p => {
+      const e = c.get(p.client) || { ids: [], no: 0, scores: [] };
+      e.ids.push(p.s.id); e.no += p.noCount; if (p.score !== null) e.scores.push(p.score);
+      c.set(p.client, e);
+    });
+    return [...c.entries()].map(([name, e]) => ({ name, ...e, avg: e.scores.length ? Math.round(e.scores.reduce((a, b) => a + b, 0) / e.scores.length) : null }))
+      .sort((a, b) => b.no - a.no || (a.avg ?? 101) - (b.avg ?? 101)).slice(0, 10);
+  }, [perSub]);
+
+  const missing = useMemo(() => stats.filter(s => s.kind === "choice" && s.multi && s.answered > 0).map(s => ({
+    s, items: [...s.opts].map((o: any) => ({ ...o, missing: s.answered - o.count, missIds: submissionIds.filter(id => { const v = bySub.get(id)?.get(s.q.id); return v != null && !asList(v).includes(o.value); }) }))
+      .filter((o: any) => o.missing > 0).sort((a: any, b: any) => b.missing - a.missing).slice(0, 8),
+  })).filter(m => m.items.length), [stats, bySub, submissionIds]);
+
+  const [rcaNames, setRcaNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    supabase.from("teams_vendors").select("cod_rca_lopes, nome_rca").then(({ data }) => {
+      const m: Record<string, string> = {};
+      (data || []).forEach((r: any) => { if (r.nome_rca) m[String(r.cod_rca_lopes)] = r.nome_rca; });
+      setRcaNames(m);
+    });
+  }, []);
+  const opportunities = useMemo(() => {
+    const rcaQ = questions.find(q => q.question_type === "vendor_select") || questions.find(q => /\brca\b/i.test(q.label));
+    const oppQs = questions.filter(q => /oportunidade/i.test(q.label));
+    const noQs = questions.filter(q => isYesNo(q) && !/oportunidade/i.test(q.label));
+    if (!oppQs.length && !noQs.length) return null;
+    const rcaOf = (id: string) => {
+      const v = rcaQ ? bySub.get(id)?.get(rcaQ.id) : null;
+      if (v == null || v === "") return "Sem RCA";
+      const cod = String(v).trim();
+      return rcaNames[cod] ? `${cod} - ${rcaNames[cod]}` : cod;
+    };
+    const byWho = new Map<string, { ids: Set<string>; total: number; items: Map<string, number> }>();
+    const overall = new Map<string, { label: string; count: number; ids: string[] }>();
+    const add = (id: string, items: string[]) => {
+      if (!items.length) return;
+      const who = rcaOf(id);
+      const e = byWho.get(who) || { ids: new Set<string>(), total: 0, items: new Map<string, number>() };
+      e.ids.add(id);
+      items.forEach(label => {
+        e.total += 1; e.items.set(label, (e.items.get(label) || 0) + 1);
+        const g = overall.get(label) || { label, count: 0, ids: [] as string[] };
+        g.count += 1; g.ids.push(id); overall.set(label, g);
+      });
+      byWho.set(who, e);
+    };
+    submissionIds.forEach(id => {
+      oppQs.forEach(q => {
+        const v = bySub.get(id)?.get(q.id);
+        if (v == null || v === "") return;
+        if (isYesNo(q)) { if (norm(v) === "sim") add(id, [q.label]); }
+        else if (CHOICE.includes(q.question_type) && Array.isArray(q.options)) add(id, q.options.filter((o: any) => asList(v).includes(norm(o.value ?? o))).map((o: any) => o.label ?? String(o)));
+        else if (String(v).trim()) add(id, [q.label]);
+      });
+      noQs.forEach(q => { const v = bySub.get(id)?.get(q.id); if (v != null && norm(v) === "nao") add(id, [`Melhorar: ${q.label}`]); });
+    });
+    if (!byWho.size) return null;
+    const rankingWho = [...byWho.entries()]
+      .map(([who, e]) => ({ who, ids: [...e.ids], total: e.total, items: [...e.items.entries()].sort((a, b) => b[1] - a[1]) }))
+      .sort((a, b) => b.total - a.total);
+    const top = [...overall.values()].sort((a, b) => b.count - a.count).slice(0, 10);
+    return { rankingWho, top };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questions, bySub, rcaNames, key]);
+
+  const yesNoStats = stats.filter(s => s.kind === "choice" && s.yesNo && s.answered > 0)
+    .map(s => { const o = s.opts.find((x: any) => x.value === "sim"); const n = s.opts.find((x: any) => x.value === "nao"); return { label: s.q.label, pct: Math.round((o.count / s.answered) * 100), yesIds: o.ids, noIds: n?.ids || [] }; });
+  const best = [...yesNoStats].sort((a, b) => b.pct - a.pct).slice(0, 3);
+  const worst = [...yesNoStats].sort((a, b) => a.pct - b.pct).slice(0, 3);
+
+  const points: MapPoint[] = useMemo(() => perSub.filter(p => p.s.latitude && p.s.longitude).map(p => ({
+    id: p.s.id, lat: Number(p.s.latitude), lng: Number(p.s.longitude), score: p.score,
+    title: p.client, subtitle: `${p.who} · ${formatDateOnlyPtBR(p.s.visit_date)}`,
+  })), [perSub]);
+
+  const drill = (label: string, ids: string[]) => { onDrill({ label, ids }); setTimeout(() => document.getElementById("lista-registros")?.scrollIntoView({ behavior: "smooth" }), 50); };
+
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+    const resumo: any[] = [];
+    stats.forEach(s => s.kind === "num"
+      ? resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: "Média", Quantidade: s.answered, Percentual: Number(s.avg.toFixed(2)) })
+      : s.opts.forEach((o: any) => resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: o.label, Quantidade: o.count, Percentual: s.answered ? Math.round(o.count / s.answered * 100) : 0 })));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), "Resumo por pergunta");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ Data: formatDateOnlyPtBR(p.s.visit_date), Colaborador: p.who, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Endereço: p.s.address || "" }))), "Registros");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clients.map(c => ({ "Rede/Cliente": c.name, Visitas: c.ids.length, "Respostas Não": c.no, "Resultado médio (% Sim)": c.avg ?? "" }))), "Clientes com atenção");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ranking.map(([n, ids]) => ({ Colaborador: n, Registros: ids.length }))), "Por colaborador");
+    if (opportunities) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(opportunities.rankingWho.map(r => ({ RCA: r.who, "Oportunidades registradas": r.total, "Visitas com oportunidade": r.ids.length, "Quais": r.items.map(([l, n]) => n > 1 ? `${l} (${n})` : l).join("; ") }))), "Oportunidades");
+    }
+    XLSX.writeFile(wb, `painel-${templateName.replace(/[^\w]+/g, "-").toLowerCase()}.xlsx`);
+  };
+
+  const exportPdf = () => {
+    const doc = new jsPDF();
+    let y = 15;
+    const line = (t: string, size = 10, bold = false) => {
+      doc.setFontSize(size); doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.splitTextToSize(t, 180).forEach((l: string) => { if (y > 280) { doc.addPage(); y = 15; } doc.text(l, 15, y); y += size * 0.5; });
+    };
+    line("LOPES DISTRIBUIDORA", 14, true); line(`Painel de resultados - ${templateName}`, 12, true);
+    line(`${submissions.length} registro(s) no filtro · gerado em ${new Date().toLocaleString("pt-BR")}`); y += 4;
+    if (best.length) { line("Pontos fortes", 11, true); best.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
+    if (worst.length) { line("Pontos de atenção", 11, true); worst.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
+    line("Registros por colaborador", 11, true); ranking.forEach(([n, ids]) => line(`- ${n}: ${ids.length}`)); y += 3;
+    if (clients.length) { line("Clientes com mais pontos de atenção", 11, true); clients.forEach(c => line(`- ${c.name}: ${c.no} resposta(s) Não em ${c.ids.length} visita(s)${c.avg !== null ? ` · ${c.avg}% Sim` : ""}`)); y += 3; }
+    missing.forEach(m => { line(`Itens mais ausentes - ${m.s.q.label}`, 11, true); m.items.forEach((o: any) => line(`- ${o.label}: ausente em ${o.missing} de ${m.s.answered}`)); y += 3; });
+    if (opportunities) {
+      line("Ranking de oportunidades", 11, true);
+      opportunities.rankingWho.forEach((r, i) => line(`- ${i + 1}o ${r.who}: ${r.total} oportunidade(s) em ${r.ids.length} visita(s) · ${r.items.map(([l, n]) => n > 1 ? `${l} (${n})` : l).join(", ")}`, 9));
+      y += 3;
+    }
+    line("Resultado por pergunta", 11, true);
+    stats.forEach(s => line(s.kind === "num" ? `- ${s.q.label}: média ${s.avg.toFixed(1)}` : `- ${s.q.label}: ${s.opts.map((o: any) => `${o.label} ${s.answered ? Math.round(o.count / s.answered * 100) : 0}%`).join(" · ")}`, 9));
+    doc.save(`painel-${templateName.replace(/[^\w]+/g, "-").toLowerCase()}.pdf`);
+  };
+
+  if (!submissionIds.length) return null;
+
+  return (
+    <section aria-label="Painel de resultados" className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold flex items-center gap-2"><BarChart3 className="h-5 w-5 text-primary" />Painel de resultados</h2>
+        {!loading && (
+          <div className="flex gap-2">
+            <Button variant="outline" className="min-h-11 gap-2" onClick={exportExcel}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
+            <Button variant="outline" className="min-h-11 gap-2" onClick={exportPdf}><FileDown className="h-4 w-4" />PDF</Button>
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">Dica: clique em qualquer barra para ver só os registros com aquela resposta.</p>
+      {loading ? (
+        <Card className="glass-card border-0"><CardContent className="py-10 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></CardContent></Card>
+      ) : (
+        <>
+          {yesNoStats.length > 0 && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />Pontos fortes</CardTitle><CardDescription>Maior % de "Sim"</CardDescription></CardHeader>
+                <CardContent className="space-y-2">{best.map(b => <Bar key={b.label} label={b.label} value={b.pct} total={100} tone="success" onClick={() => drill(`${b.label}: Sim`, b.yesIds)} />)}</CardContent></Card>
+              <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-destructive" />Pontos de atenção</CardTitle><CardDescription>Menor % de "Sim" · clique para ver os "Não"</CardDescription></CardHeader>
+                <CardContent className="space-y-2">{worst.map(b => <Bar key={b.label} label={b.label} value={b.pct} total={100} tone="destructive" onClick={() => drill(`${b.label}: Não`, b.noIds)} />)}</CardContent></Card>
+            </div>
+          )}
+
+          {points.length > 0 && (
+            <Card className="glass-card border-0">
+              <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><MapIcon className="h-4 w-4 text-primary" />Mapa dos resultados</CardTitle>
+                <CardDescription className="flex flex-wrap gap-3">
+                  <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-full bg-success" />80% ou mais de Sim</span>
+                  <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-full bg-[hsl(var(--warning))]" />50% a 79%</span>
+                  <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-full bg-destructive" />Abaixo de 50%</span>
+                </CardDescription></CardHeader>
+              <CardContent><SubmissionsResultsMap points={points} /></CardContent>
+            </Card>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {clients.length > 0 && (
+              <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Store className="h-4 w-4 text-destructive" />Clientes com mais pontos de atenção</CardTitle><CardDescription>Respostas "Não" somadas por Rede/Cliente</CardDescription></CardHeader>
+                <CardContent className="space-y-1">
+                  {clients.map(c => (
+                    <button key={c.name} type="button" onClick={() => drill(`Rede/Cliente: ${c.name}`, c.ids)} className="w-full flex justify-between gap-2 text-sm rounded-md px-2 py-2 hover:bg-muted/50 min-h-11 text-left">
+                      <span className="truncate">{c.name}</span>
+                      <span className="shrink-0"><b className="text-destructive">{c.no} Não</b> <span className="text-muted-foreground">· {c.ids.length} visita(s){c.avg !== null ? ` · ${c.avg}% Sim` : ""}</span></span>
+                    </button>
+                  ))}
+                </CardContent></Card>
+            )}
+            <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base">Registros por colaborador</CardTitle><CardDescription>{submissionIds.length} no filtro</CardDescription></CardHeader>
+              <CardContent className="space-y-2">{ranking.map(([n, ids]) => <Bar key={n} label={n} value={ids.length} total={submissionIds.length} onClick={() => drill(`Colaborador: ${n}`, ids)} />)}</CardContent></Card>
+          </div>
+
+          {missing.length > 0 && (
+            <div className="grid gap-3 md:grid-cols-2">
+              {missing.map(m => (
+                <Card key={m.s.q.id} className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><PackageX className="h-4 w-4 text-destructive" />Itens mais ausentes</CardTitle><CardDescription>{m.s.q.label} · não marcados</CardDescription></CardHeader>
+                  <CardContent className="space-y-2">{m.items.map((o: any) => <Bar key={o.value} label={o.label} value={o.missing} total={m.s.answered} tone="destructive" onClick={() => drill(`${m.s.q.label}: sem ${o.label}`, o.missIds)} />)}</CardContent></Card>
+              ))}
+            </div>
+          )}
+
+          {opportunities && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <Card className="glass-card border-0">
+                <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Lightbulb className="h-4 w-4 text-primary" />Ranking de oportunidades por RCA</CardTitle><CardDescription>RCAs acompanhados com mais oportunidades (inclui respostas "Não") · clique para ver os registros</CardDescription></CardHeader>
+                <CardContent className="space-y-1">
+                  {opportunities.rankingWho.map((r, i) => (
+                    <button key={r.who} type="button" onClick={() => drill(`Oportunidades de ${r.who}`, r.ids)} className="w-full rounded-md px-2 py-2 hover:bg-muted/50 min-h-11 text-left">
+                      <div className="flex justify-between gap-2 text-sm">
+                        <span className="truncate"><span className="font-semibold text-muted-foreground mr-1">{i + 1}º</span>{r.who}</span>
+                        <span className="shrink-0 font-semibold text-primary">{r.total} <span className="text-muted-foreground font-normal">em {r.ids.length} visita(s)</span></span>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {r.items.map(([label, n]) => (
+                          <span key={label} className="text-xs rounded-full bg-muted px-2 py-0.5">{label}{n > 1 ? ` (${n})` : ""}</span>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+              <Card className="glass-card border-0">
+                <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Lightbulb className="h-4 w-4 text-primary" />Oportunidades mais citadas</CardTitle><CardDescription>Tipos de oportunidade registrados no período</CardDescription></CardHeader>
+                <CardContent className="space-y-2">
+                  {opportunities.top.map(o => <Bar key={o.label} label={o.label} value={o.count} total={submissionIds.length} onClick={() => drill(`Oportunidade: ${o.label}`, o.ids)} />)}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {stats.map(s => (
+              <Card key={s.q.id} className="glass-card border-0">
+                <CardHeader className="pb-2"><CardDescription className="text-xs uppercase">{s.q.section}</CardDescription><CardTitle className="text-base">{s.q.label}</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  {s.kind === "num" ? (
+                    <p className="text-3xl font-bold text-primary">{s.answered ? s.avg.toFixed(1) : "—"}<span className="text-sm font-normal text-muted-foreground"> média · {s.answered} resp.</span></p>
+                  ) : (
+                    <>
+                      {[...s.opts].sort((a: any, b: any) => s.multi ? b.count - a.count : 0).map((o: any) => (
+                        <Bar key={o.value} label={o.label} value={o.count} total={s.answered} onClick={o.count ? () => drill(`${s.q.label}: ${o.label}`, o.ids) : undefined}
+                          tone={o.value === "sim" ? "success" : o.value === "nao" ? "destructive" : "primary"} />
+                      ))}
+                      <p className="text-xs text-muted-foreground">{s.answered} resposta(s){s.multi ? " · % de registros que marcaram" : ""}</p>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}

@@ -5,7 +5,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Table as TableIcon, Minimize2, Maximize2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { normalizeManagerName, TeamMember, getBaseManagerName } from "@/lib/normalizeManager";
+import { normalizeManagerName, TeamMember, getBaseManagerName, buildManagerName } from "@/lib/normalizeManager";
 
 interface VisitData {
   id: string;
@@ -23,9 +23,10 @@ interface VisitsByDayTableProps {
   visits: VisitData[];
   allManagers?: string[];
   dailyGoal?: number;
+  showAllTeamMembers?: boolean;
 }
 
-export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: VisitsByDayTableProps) {
+export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7, showAllTeamMembers = true }: VisitsByDayTableProps) {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [dailyGoals, setDailyGoals] = useState<DailyGoalEntry[]>([]);
   const [compactView, setCompactView] = useState(false);
@@ -76,7 +77,7 @@ export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: Vi
         supabase
           .from("teams_vendors")
           .select("cod_rca_lopes, nome_rca, nome_equipe, cargo")
-          .or("cargo.eq.coordenador,cargo.eq.gerente,cargo.eq.supervisor"),
+          .in("cargo", ["coordenador", "gerente", "supervisor"]),
         supabase
           .from("team_daily_goals")
           .select("nome_equipe, meta_diaria, cod_rca_lopes")
@@ -131,6 +132,16 @@ export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: Vi
     const managersSet = allManagers.length > 0 
       ? new Set([...normalizedAllManagers]) 
       : managersFromVisits;
+
+    // Incluir todos os gestores cadastrados (coordenador/gerente/supervisor),
+    // mesmo que não tenham nenhuma visita no período
+    if (showAllTeamMembers) {
+      teamMembers.forEach(m => {
+        const name = buildManagerName(m);
+        if (name) managersSet.add(normalizeManagerKey(name));
+      });
+    }
+
     const managers = Array.from(managersSet).sort();
 
     // Get the month/year from visits to determine days in month
@@ -203,7 +214,7 @@ export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: Vi
     const grandTotal = Object.values(rowTotals).reduce((sum, val) => sum + val, 0);
 
     return { managers, days, matrix, rowTotals, columnTotals, grandTotal, daysInfo, weeksData, monthName, year, month };
-  }, [visits, allManagers, teamMembers]);
+  }, [visits, allManagers, teamMembers, showAllTeamMembers]);
 
   // Apply compact view filter
   const filteredData = useMemo(() => {
@@ -214,8 +225,9 @@ export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: Vi
     // Filter days with at least one visit
     const filteredDays = days.filter(day => columnTotals[day] > 0);
     
-    // Filter managers with at least one visit
-    const filteredManagers = managers.filter(manager => rowTotals[manager] > 0);
+    // A visualização compacta reduz somente os dias vazios. Gestores sem
+    // visitas permanecem visíveis para o acompanhamento da equipe completa.
+    const filteredManagers = managers;
     
     // Filter daysInfo for filtered days
     const filteredDaysInfo = daysInfo.filter(d => columnTotals[d.day] > 0);
@@ -238,7 +250,7 @@ export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: Vi
 
   const { filteredManagers, filteredDays, filteredDaysInfo, filteredWeeksData } = filteredData;
 
-  if (visits.length === 0 && allManagers.length === 0) {
+  if (visits.length === 0 && allManagers.length === 0 && managers.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -275,7 +287,7 @@ export function VisitsByDayTable({ visits, allManagers = [], dailyGoal = 7 }: Vi
         </CardTitle>
         <CardDescription>
           {compactView 
-            ? "Exibindo apenas dias e gestores com visitas" 
+            ? "Exibindo apenas dias com visitas; todos os gestores permanecem visíveis"
             : "Matriz de visitas realizadas por supervisor e dia"}
         </CardDescription>
       </CardHeader>

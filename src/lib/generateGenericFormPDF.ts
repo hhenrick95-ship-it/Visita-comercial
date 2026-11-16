@@ -1,6 +1,8 @@
 import jsPDF from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 import logoLopes from "@/assets/logo-lopes.png";
+import { calendarDateToLocal } from "@/lib/formDate";
+import { formatDateOnlyPtBR } from "@/lib/utils";
 
 /**
  * Generic PDF generator for any form template (other than "visita" — that one
@@ -120,7 +122,7 @@ function formatValue(question: QuestionRow, value: any): string {
   }
   if (question.question_type === "date" && typeof value === "string") {
     try {
-      return new Date(value).toLocaleDateString("pt-BR");
+      return formatDateOnlyPtBR(value);
     } catch {
       return String(value);
     }
@@ -139,6 +141,10 @@ export async function generateGenericFormPDF(submissionId: string, opts?: { file
     .single();
   if (subErr || !submission) throw new Error("Não foi possível carregar o registro.");
   const sub = submission as SubmissionRow;
+  const { data: visitDate, error: dateErr } = await supabase.rpc("get_form_submission_date", {
+    p_submission_id: submissionId,
+  });
+  if (dateErr) throw dateErr;
 
   const { data: template, error: tplErr } = await templatesClient
     .select("id, name, description")
@@ -206,7 +212,7 @@ export async function generateGenericFormPDF(submissionId: string, opts?: { file
   doc.setLineWidth(1);
   doc.line(marginLeft + 30, 150, pageWidth - marginLeft - 30, 150);
 
-  const dateFormatted = new Date(sub.submitted_at).toLocaleDateString("pt-BR", {
+  const dateFormatted = calendarDateToLocal(visitDate || sub.submitted_at.slice(0, 10)).toLocaleDateString("pt-BR", {
     weekday: "long",
     year: "numeric",
     month: "long",

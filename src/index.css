@@ -42,6 +42,7 @@ All colors MUST be HSL.
     --form-section: 210 40% 98%;
     --form-label: 215 25% 27%;
     --success: 142 76% 36%;
+    --warning: 38 92% 50%;
     --success-foreground: 0 0% 100%;
 
     /* Home gradients & glass */
@@ -107,6 +108,7 @@ All colors MUST be HSL.
     --form-section: 217 33% 20%;
     --form-label: 210 40% 98%;
     --success: 142 76% 36%;
+    --warning: 38 92% 50%;
     --success-foreground: 0 0% 100%;
 
     /* Chart colors dark mode */

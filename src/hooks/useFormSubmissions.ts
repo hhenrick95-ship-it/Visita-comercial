@@ -6,6 +6,7 @@ export interface FormSubmissionRecord {
   template_id: string;
   created_at: string;
   submitted_at: string;
+  visit_date: string;
   created_by: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -37,7 +38,17 @@ export function useFormSubmissions(templateId: string | undefined) {
         .eq("template_id", templateId)
         .order("submitted_at", { ascending: false });
       if (error) throw error;
-      setSubmissions((data || []) as FormSubmissionRecord[]);
+      const { data: dates, error: dateError } = await supabase.rpc("get_form_submission_dates", {
+        p_template_id: templateId,
+      });
+      if (dateError) throw dateError;
+      const dateMap = new Map((dates || []).map((row) => [row.id, row.visit_date]));
+      setSubmissions((data || []).map((row: FormSubmissionRecord) => ({
+        ...row,
+        visit_date: dateMap.get(row.id) || row.submitted_at.slice(0, 10),
+      })).sort((a: FormSubmissionRecord, b: FormSubmissionRecord) =>
+        b.visit_date.localeCompare(a.visit_date) || b.submitted_at.localeCompare(a.submitted_at)
+      ));
     } catch (e: any) {
       setError(e.message);
     } finally {

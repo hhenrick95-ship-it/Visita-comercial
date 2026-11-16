@@ -1,0 +1,1 @@
+delete from public.profiles where email like 'diag.teste.%'; delete from auth.users where email like 'diag.teste.%';

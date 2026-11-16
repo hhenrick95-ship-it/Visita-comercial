@@ -207,6 +207,72 @@ export type Database = {
           },
         ]
       }
+      clientes_import_staging: {
+        Row: {
+          bairro: string | null
+          cidade: string | null
+          cnpj: string | null
+          codcli: number | null
+          email: string | null
+          endereco: string | null
+          fantasia: string | null
+          ramo: string | null
+          razao_social: string | null
+          situacao: string | null
+          telefone: string | null
+          tipo_fj: string | null
+          uf: string | null
+        }
+        Insert: {
+          bairro?: string | null
+          cidade?: string | null
+          cnpj?: string | null
+          codcli?: number | null
+          email?: string | null
+          endereco?: string | null
+          fantasia?: string | null
+          ramo?: string | null
+          razao_social?: string | null
+          situacao?: string | null
+          telefone?: string | null
+          tipo_fj?: string | null
+          uf?: string | null
+        }
+        Update: {
+          bairro?: string | null
+          cidade?: string | null
+          cnpj?: string | null
+          codcli?: number | null
+          email?: string | null
+          endereco?: string | null
+          fantasia?: string | null
+          ramo?: string | null
+          razao_social?: string | null
+          situacao?: string | null
+          telefone?: string | null
+          tipo_fj?: string | null
+          uf?: string | null
+        }
+        Relationships: []
+      }
+      clientes_rcas_import_staging: {
+        Row: {
+          cod_rca: string | null
+          codcli: number | null
+          nome_rca: string | null
+        }
+        Insert: {
+          cod_rca?: string | null
+          codcli?: number | null
+          nome_rca?: string | null
+        }
+        Update: {
+          cod_rca?: string | null
+          codcli?: number | null
+          nome_rca?: string | null
+        }
+        Relationships: []
+      }
       dashboard_layout: {
         Row: {
           component_order: Json
@@ -621,6 +687,24 @@ export type Database = {
         }
         Relationships: []
       }
+      manager_user_links: {
+        Row: {
+          cod_rca_lopes: string
+          created_at: string
+          user_id: string
+        }
+        Insert: {
+          cod_rca_lopes: string
+          created_at?: string
+          user_id: string
+        }
+        Update: {
+          cod_rca_lopes?: string
+          created_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       pesquisa_satisfacao_logistica: {
         Row: {
           cliente_codigo: string | null
@@ -992,6 +1076,7 @@ export type Database = {
         Args: { user_email: string }
         Returns: boolean
       }
+      format_manager_name: { Args: { p_cod: string }; Returns: string }
       get_active_form_templates: {
         Args: never
         Returns: {
@@ -1083,6 +1168,30 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_form_submission_date: {
+        Args: { p_submission_id: string }
+        Returns: string
+      }
+      get_form_submission_dates: {
+        Args: { p_template_id: string }
+        Returns: {
+          id: string
+          visit_date: string
+        }[]
+      }
+      get_satisfaction_survey_results: {
+        Args: never
+        Returns: {
+          client_cnpj: string
+          client_code: string
+          client_name: string
+          id: string
+          rca_cod: string
+          scores: Json
+          submitted_at: string
+          supervisor_cod: string
+        }[]
+      }
       get_top_managers_current_month: {
         Args: never
         Returns: {
@@ -1133,13 +1242,24 @@ export type Database = {
         Returns: boolean
       }
       is_approved: { Args: { _user_id: string }; Returns: boolean }
+      search_clientes_pesquisa: {
+        Args: { p_term?: string }
+        Returns: {
+          cidade: string
+          cnpj: string
+          codcli: number
+          nome_fantasia: string
+          razao_social: string
+          uf: string
+        }[]
+      }
       user_can_access_rca: {
         Args: { _cod_rca: string; _user_id: string }
         Returns: boolean
       }
     }
     Enums: {
-      app_role: "admin" | "gestor" | "usuario"
+      app_role: "admin" | "gestor" | "usuario" | "vendedor"
       team_role: "coordenador" | "supervisor" | "vendedor" | "gerente"
     }
     CompositeTypes: {
@@ -1156,12 +1276,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1185,11 +1305,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1210,11 +1330,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1235,11 +1355,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1252,11 +1372,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1268,7 +1388,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "gestor", "usuario"],
+      app_role: ["admin", "gestor", "usuario", "vendedor"],
       team_role: ["coordenador", "supervisor", "vendedor", "gerente"],
     },
   },

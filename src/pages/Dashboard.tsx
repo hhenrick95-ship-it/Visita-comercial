@@ -141,14 +141,17 @@ export default function Dashboard() {
 
   // Recalcular availableManagers quando gestores carregam (para resolver nomes truncados)
   useEffect(() => {
-    if (visits.length > 0 && availableGestores.length > 0) {
+    if (availableGestores.length > 0) {
       const teamMembersForNorm = availableGestores.map(g => ({
         cod_rca_lopes: g.cod_rca_lopes,
         nome_rca: g.nome_rca,
         nome_equipe: g.nome_equipe,
         cargo: g.cargo,
       }));
-      const uniqueManagers = [...new Set(visits.map(v => normalizeManagerName(v.manager, teamMembersForNorm)))].sort();
+      const uniqueManagers = [...new Set([
+        ...availableGestores.map(g => g.fullName),
+        ...visits.map(v => normalizeManagerName(v.manager, teamMembersForNorm)),
+      ])].sort();
       setAvailableManagers(uniqueManagers);
     }
   }, [visits, availableGestores]);
@@ -1091,7 +1094,13 @@ export default function Dashboard() {
               );
 
             case "visitsByDay":
-              return <VisitsByDayTable key="visitsByDay" visits={rawFilteredVisits} allManagers={filteredManagersForTable} dailyGoal={7} />;
+              return <VisitsByDayTable
+                key="visitsByDay"
+                visits={rawFilteredVisits}
+                allManagers={filteredManagersForTable}
+                dailyGoal={7}
+                showAllTeamMembers={filterManagers.length === 0}
+              />;
 
             case "rcaFocus":
               return (

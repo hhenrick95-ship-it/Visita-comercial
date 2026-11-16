@@ -112,7 +112,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       toast.success("Cadastro realizado! Aguarde a aprovação do administrador.");
       navigate("/pending");
     } catch (error: any) {
-      toast.error(error.message || "Erro ao cadastrar");
+      const msg = String(error?.message || "");
+      let friendly = msg || "Erro ao cadastrar";
+      if (/already registered|already been registered|User already/i.test(msg)) {
+        friendly = "Este email já está cadastrado. Faça login ou use 'Esqueci minha senha'.";
+      } else if (/weak|pwned/i.test(msg)) {
+        friendly = "Senha muito fraca. Use pelo menos 6 caracteres com letras e números.";
+      } else if (/at least|should be/i.test(msg)) {
+        friendly = "A senha deve ter pelo menos 6 caracteres.";
+      } else if (/invalid email/i.test(msg)) {
+        friendly = "Email inválido.";
+      } else if (/rate limit|too many/i.test(msg)) {
+        friendly = "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
+      }
+      toast.error(friendly);
       throw error;
     }
   };

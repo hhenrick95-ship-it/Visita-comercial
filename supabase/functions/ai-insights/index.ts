@@ -297,6 +297,7 @@ async function handleGenericTemplateAnalysis(
   let q = supabase.from('form_submissions').select('*').eq('template_id', templateId);
   if (filters?.startDate) q = q.gte('submitted_at', filters.startDate);
   if (filters?.endDate) q = q.lte('submitted_at', filters.endDate + 'T23:59:59');
+  if (Array.isArray(filters?.submissionIds) && filters.submissionIds.length) q = q.in('id', filters.submissionIds.slice(0, 500));
   const { data: submissions, error: subErr } = await q.order('submitted_at', { ascending: false }).limit(500);
   if (subErr) throw subErr;
 

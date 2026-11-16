@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1792161991577,
+      "tag": "0000_add_vendedor_app_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792162056558,
+      "tag": "0001_create_pesquisa_satisfacao_template",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792162080529,
+      "tag": "0002_satisfaction_survey_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793732182475,
+      "tag": "0003_clientes_import_staging",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793732343540,
+      "tag": "0004_attribute_visits_to_creator_manager",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793733682212,
+      "tag": "0005_use_selected_form_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794603467741,
+      "tag": "0006_restrict_tutorial_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794839088083,
+      "tag": "0007_restrict_docs_layout_to_approved",
+      "breakpoints": true
+    }
+  ]
+}
