@@ -3,14 +3,14 @@ import * as XLSX from "@e965/xlsx";
 import jsPDF from "jspdf";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Loader2, TrendingUp, AlertTriangle, Store, PackageX, Map as MapIcon, FileSpreadsheet, FileDown, Lightbulb } from "lucide-react";
+import { BarChart3, Loader2, TrendingUp, AlertTriangle, Store, PackageX, Map as MapIcon, FileSpreadsheet, FileDown, Lightbulb, ArrowUpRight, ArrowDownRight, CircleAlert, GitCompareArrows } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDateOnlyPtBR } from "@/lib/utils";
 import { yesScore } from "@/lib/submissionScore";
 import { SubmissionsResultsMap, type MapPoint } from "@/components/SubmissionsResultsMap";
 
 interface Question { id: string; label: string; question_type: string; options: any; section: string; order: number }
-export interface DashSubmission { id: string; visit_date: string; created_by: string | null; latitude: number | null; longitude: number | null; address: string | null; metadata: any }
+export interface DashSubmission { id: string; visit_date: string; submitted_at?: string; created_by: string | null; latitude: number | null; longitude: number | null; address: string | null; metadata: any }
 export interface Drill { label: string; ids: string[] }
 interface Props { templateId: string; templateName: string; submissions: DashSubmission[]; names: Record<string, string>; onDrill: (d: Drill | null) => void }
 
@@ -18,6 +18,46 @@ const CHOICE = ["radio", "select", "multi_select", "checkbox"];
 const NUMERIC = ["slider", "scale", "rating", "number"];
 const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
 const asList = (v: any) => (Array.isArray(v) ? v : [v]).map(norm);
+
+type PexNetwork = "all" | "DB" | "Baratão";
+type EvolutionStatus = "resolved" | "improved" | "pending" | "worsened";
+
+const normalizeText = (value: unknown) => String(value ?? "")
+  .trim()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLocaleLowerCase("pt-BR");
+
+const normalizeEntityKey = (value: unknown) => normalizeText(value)
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+
+const identifyPexNetwork = (value: unknown): Exclude<PexNetwork, "all"> | "Outras" => {
+  const normalized = normalizeText(value);
+  if (/(^|\W)db(\W|$)/i.test(normalized)) return "DB";
+  if (normalized.includes("baratao")) return "Baratão";
+  return "Outras";
+};
+
+const pexAnswerScore = (value: unknown): number | null => {
+  const normalized = normalizeText(value);
+  if (normalized === "nao") return 0;
+  if (normalized === "parcial") return 1;
+  if (normalized === "sim") return 2;
+  return null;
+};
+
+const displayPexAnswer = (value: unknown) => {
+  const score = pexAnswerScore(value);
+  return score === 0 ? "Não" : score === 1 ? "Parcial" : score === 2 ? "Sim" : String(value ?? "—");
+};
+
+const evolutionLabel: Record<EvolutionStatus, string> = {
+  resolved: "Resolvido",
+  improved: "Melhorou",
+  pending: "Continua pendente",
+  worsened: "Piorou",
+};
 
 function Bar({ label, value, total, tone = "primary", onClick }: { label: string; value: number; total: number; tone?: "primary" | "destructive" | "success"; onClick?: () => void }) {
   const pct = total ? Math.round((value / total) * 100) : 0;
@@ -37,7 +77,9 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   const [questions, setQuestions] = useState<Question[]>([]);
   const [responses, setResponses] = useState<{ submission_id: string; question_id: string; response_value: any }[]>([]);
   const [loading, setLoading] = useState(true);
-  const submissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
+  const [pexNetwork, setPexNetwork] = useState<PexNetwork>("all");
+  const allSubmissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
+  const isPexJbp = /pex.*j(?:bp|pb)/i.test(templateName);
 
   useEffect(() => {
     let active = true;
@@ -54,15 +96,15 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     return () => { active = false; };
   }, [templateId]);
 
-  const key = submissionIds.join(",");
+  const key = allSubmissionIds.join(",");
   useEffect(() => {
     let active = true;
     setLoading(true);
     (async () => {
       const all: any[] = [];
-      for (let i = 0; i < submissionIds.length; i += 100) {
+      for (let i = 0; i < allSubmissionIds.length; i += 100) {
         const { data } = await supabase.from("form_responses").select("submission_id, question_id, response_value")
-          .in("submission_id", submissionIds.slice(i, i + 100));
+          .in("submission_id", allSubmissionIds.slice(i, i + 100));
         all.push(...(data || []));
       }
       if (active) { setResponses(all); setLoading(false); }
@@ -82,17 +124,45 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   }, [responses]);
 
   const clientQ = useMemo(() => questions.find(q => /rede|cliente/i.test(q.label) && !CHOICE.includes(q.question_type) && !NUMERIC.includes(q.question_type)), [questions]);
+  const storeQ = useMemo(() => questions.find(q => normalizeText(q.label) === "loja"), [questions]);
 
-  const perSub = useMemo(() => submissions.map(s => {
+  const allPerSub = useMemo(() => submissions.map(s => {
     const ans = bySub.get(s.id) || new Map();
     const score = yesScore([...ans.entries()].map(([qid, v]) => ({ value: v, yesNo: isYesNo(qMap.get(qid)) })));
     const noCount = [...ans.entries()].filter(([qid, v]) => isYesNo(qMap.get(qid)) && norm(v) === "nao").length;
     const md = s.metadata || {};
     const rawClient = (clientQ && ans.get(clientQ.id)) || md.client_data?.nome_fantasia || md.client || md.cliente || "";
     const client = String(typeof rawClient === "object" ? JSON.stringify(rawClient) : rawClient).trim() || "Não informado";
-    return { s, score, noCount, client, who: names[s.created_by || ""] || "Sem colaborador" };
+    const rawStore = (storeQ && ans.get(storeQ.id)) || md.store || md.loja || "";
+    const store = String(typeof rawStore === "object" ? JSON.stringify(rawStore) : rawStore).trim() || client;
+    return {
+      s,
+      score,
+      noCount,
+      client,
+      store,
+      network: identifyPexNetwork(client),
+      who: names[s.created_by || ""] || "Sem colaborador",
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [submissions, bySub, qMap, clientQ, names]);
+  }), [submissions, bySub, qMap, clientQ, storeQ, names]);
+
+  const perSub = useMemo(
+    () => !isPexJbp || pexNetwork === "all" ? allPerSub : allPerSub.filter(p => p.network === pexNetwork),
+    [allPerSub, isPexJbp, pexNetwork],
+  );
+  const submissionIds = useMemo(() => perSub.map(p => p.s.id), [perSub]);
+  const filteredKey = submissionIds.join(",");
+  const networkCounts = useMemo(() => ({
+    DB: allPerSub.filter(p => p.network === "DB").length,
+    Baratão: allPerSub.filter(p => p.network === "Baratão").length,
+  }), [allPerSub]);
+
+  useEffect(() => {
+    if (!isPexJbp) return;
+    if (pexNetwork === "all") onDrill(null);
+    else onDrill({ label: `Rede: ${pexNetwork}`, ids: filteredKey ? filteredKey.split(",") : [] });
+  }, [filteredKey, isPexJbp, onDrill, pexNetwork]);
 
   const stats = useMemo(() => questions.map(q => {
     const entries = submissionIds.map(id => [id, bySub.get(id)?.get(q.id)] as const).filter(([, v]) => v !== undefined && v !== null && v !== "");
@@ -110,7 +180,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     }
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }).filter(Boolean) as any[], [questions, bySub, key]);
+  }).filter(Boolean) as any[], [questions, bySub, filteredKey]);
 
   const ranking = useMemo(() => {
     const c = new Map<string, string[]>();
@@ -184,7 +254,91 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     const top = [...overall.values()].sort((a, b) => b.count - a.count).slice(0, 10);
     return { rankingWho, top };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [questions, bySub, rcaNames, key]);
+  }, [questions, bySub, rcaNames, filteredKey]);
+
+  const pexAssessmentQuestions = useMemo(() => questions.filter(q => {
+    if (!isPexJbp || !Array.isArray(q.options)) return false;
+    const values = q.options.map((option: any) => normalizeText(option.value ?? option));
+    return values.includes("sim") && values.includes("parcial") && values.includes("nao");
+  }), [isPexJbp, questions]);
+
+  const evolutionRows = useMemo(() => {
+    if (!isPexJbp || !pexAssessmentQuestions.length) return [];
+    const grouped = new Map<string, typeof perSub>();
+    perSub.forEach(item => {
+      const storeKey = normalizeEntityKey(item.store);
+      if (!storeKey) return;
+      const groupKey = `${item.network}|${storeKey}`;
+      grouped.set(groupKey, [...(grouped.get(groupKey) || []), item]);
+    });
+
+    const rows: {
+      network: string;
+      store: string;
+      question: string;
+      section: string;
+      previous: string;
+      current: string;
+      previousDate: string;
+      currentDate: string;
+      status: EvolutionStatus;
+      currentSubmissionId: string;
+    }[] = [];
+
+    grouped.forEach(visits => {
+      if (visits.length < 2) return;
+      const ordered = [...visits].sort((a, b) =>
+        a.s.visit_date.localeCompare(b.s.visit_date) ||
+        String(a.s.submitted_at || "").localeCompare(String(b.s.submitted_at || "")),
+      );
+      const previousVisit = ordered[ordered.length - 2];
+      const currentVisit = ordered[ordered.length - 1];
+      const previousAnswers = bySub.get(previousVisit.s.id) || new Map();
+      const currentAnswers = bySub.get(currentVisit.s.id) || new Map();
+
+      pexAssessmentQuestions.forEach(question => {
+        const previous = previousAnswers.get(question.id);
+        const current = currentAnswers.get(question.id);
+        const previousScore = pexAnswerScore(previous);
+        const currentScore = pexAnswerScore(current);
+        if (previousScore === null || currentScore === null) return;
+        // "Sim" nas duas visitas já está saudável e não precisa ocupar a lista de evolução.
+        if (previousScore === 2 && currentScore === 2) return;
+
+        let status: EvolutionStatus;
+        if (currentScore > previousScore) status = previousScore === 0 && currentScore === 2 ? "resolved" : "improved";
+        else if (currentScore < previousScore) status = "worsened";
+        else status = "pending";
+
+        rows.push({
+          network: currentVisit.network,
+          store: currentVisit.store,
+          question: question.label,
+          section: question.section,
+          previous: displayPexAnswer(previous),
+          current: displayPexAnswer(current),
+          previousDate: previousVisit.s.visit_date,
+          currentDate: currentVisit.s.visit_date,
+          status,
+          currentSubmissionId: currentVisit.s.id,
+        });
+      });
+    });
+
+    const priority: Record<EvolutionStatus, number> = { worsened: 0, pending: 1, improved: 2, resolved: 3 };
+    return rows.sort((a, b) =>
+      priority[a.status] - priority[b.status] ||
+      a.network.localeCompare(b.network, "pt-BR") ||
+      a.store.localeCompare(b.store, "pt-BR") ||
+      a.question.localeCompare(b.question, "pt-BR"),
+    );
+  }, [bySub, isPexJbp, perSub, pexAssessmentQuestions]);
+
+  const evolutionCounts = useMemo(() => ({
+    positive: evolutionRows.filter(row => row.status === "resolved" || row.status === "improved").length,
+    pending: evolutionRows.filter(row => row.status === "pending").length,
+    worsened: evolutionRows.filter(row => row.status === "worsened").length,
+  }), [evolutionRows]);
 
   const yesNoStats = stats.filter(s => s.kind === "choice" && s.yesNo && s.answered > 0)
     .map(s => { const o = s.opts.find((x: any) => x.value === "sim"); const n = s.opts.find((x: any) => x.value === "nao"); return { label: s.q.label, pct: Math.round((o.count / s.answered) * 100), yesIds: o.ids, noIds: n?.ids || [] }; });
@@ -197,6 +351,11 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   })), [perSub]);
 
   const drill = (label: string, ids: string[]) => { onDrill({ label, ids }); setTimeout(() => document.getElementById("lista-registros")?.scrollIntoView({ behavior: "smooth" }), 50); };
+  const handlePexNetworkChange = (network: PexNetwork) => {
+    setPexNetwork(network);
+    if (network === "all") onDrill(null);
+    else onDrill({ label: `Rede: ${network}`, ids: allPerSub.filter(item => item.network === network).map(item => item.s.id) });
+  };
 
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
@@ -205,11 +364,24 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       ? resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: "Média", Quantidade: s.answered, Percentual: Number(s.avg.toFixed(2)) })
       : s.opts.forEach((o: any) => resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: o.label, Quantidade: o.count, Percentual: s.answered ? Math.round(o.count / s.answered * 100) : 0 })));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), "Resumo por pergunta");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ Data: formatDateOnlyPtBR(p.s.visit_date), Colaborador: p.who, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Endereço: p.s.address || "" }))), "Registros");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ Data: formatDateOnlyPtBR(p.s.visit_date), Colaborador: p.who, Rede: p.network, Loja: p.store, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Endereço: p.s.address || "" }))), "Registros");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clients.map(c => ({ "Rede/Cliente": c.name, Visitas: c.ids.length, "Respostas Não": c.no, "Resultado médio (% Sim)": c.avg ?? "" }))), "Clientes com atenção");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ranking.map(([n, ids]) => ({ Colaborador: n, Registros: ids.length }))), "Por colaborador");
     if (opportunities) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(opportunities.rankingWho.map(r => ({ RCA: r.who, "Oportunidades registradas": r.total, "Visitas com oportunidade": r.ids.length, "Quais": r.items.map(([l, n]) => n > 1 ? `${l} (${n})` : l).join("; ") }))), "Oportunidades");
+    }
+    if (isPexJbp && evolutionRows.length) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(evolutionRows.map(row => ({
+        Rede: row.network,
+        Loja: row.store,
+        Seção: row.section,
+        "Ponto avaliado": row.question,
+        "Data anterior": formatDateOnlyPtBR(row.previousDate),
+        "Resposta anterior": row.previous,
+        "Data atual": formatDateOnlyPtBR(row.currentDate),
+        "Resposta atual": row.current,
+        Evolução: evolutionLabel[row.status],
+      }))), "Evolução PEX");
     }
     XLSX.writeFile(wb, `painel-${templateName.replace(/[^\w]+/g, "-").toLowerCase()}.xlsx`);
   };
@@ -222,7 +394,13 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       doc.splitTextToSize(t, 180).forEach((l: string) => { if (y > 280) { doc.addPage(); y = 15; } doc.text(l, 15, y); y += size * 0.5; });
     };
     line("LOPES DISTRIBUIDORA", 14, true); line(`Painel de resultados - ${templateName}`, 12, true);
-    line(`${submissions.length} registro(s) no filtro · gerado em ${new Date().toLocaleString("pt-BR")}`); y += 4;
+    line(`${submissionIds.length} registro(s) no filtro · gerado em ${new Date().toLocaleString("pt-BR")}`); y += 4;
+    if (isPexJbp) {
+      line(`Rede: ${pexNetwork === "all" ? "Todas" : pexNetwork}`, 10, true);
+      line(`Evolução: ${evolutionCounts.positive} melhorado(s)/resolvido(s), ${evolutionCounts.pending} pendente(s), ${evolutionCounts.worsened} piora(s).`);
+      evolutionRows.forEach(row => line(`- ${row.network} · ${row.store} · ${row.question}: ${row.previous} -> ${row.current} (${evolutionLabel[row.status]})`, 8));
+      y += 3;
+    }
     if (best.length) { line("Pontos fortes", 11, true); best.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
     if (worst.length) { line("Pontos de atenção", 11, true); worst.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
     line("Registros por colaborador", 11, true); ranking.forEach(([n, ids]) => line(`- ${n}: ${ids.length}`)); y += 3;
@@ -238,7 +416,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     doc.save(`painel-${templateName.replace(/[^\w]+/g, "-").toLowerCase()}.pdf`);
   };
 
-  if (!submissionIds.length) return null;
+  if (!allSubmissionIds.length) return null;
 
   return (
     <section aria-label="Painel de resultados" className="space-y-4">
@@ -252,10 +430,105 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
         )}
       </div>
       <p className="text-xs text-muted-foreground">Dica: clique em qualquer barra para ver só os registros com aquela resposta.</p>
+      {isPexJbp && (
+        <Card className="glass-card border-0">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Filtro por rede</CardTitle>
+            <CardDescription>O filtro afeta os indicadores, a evolução, o mapa, as exportações e a lista de registros.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {([
+              { value: "all" as const, label: "Todas", count: allPerSub.length },
+              { value: "DB" as const, label: "DB", count: networkCounts.DB },
+              { value: "Baratão" as const, label: "Baratão", count: networkCounts.Baratão },
+            ]).map(option => (
+              <Button
+                key={option.value}
+                type="button"
+                variant={pexNetwork === option.value ? "default" : "outline"}
+                className="min-h-11"
+                onClick={() => handlePexNetworkChange(option.value)}
+              >
+                {option.label} ({option.count})
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
       {loading ? (
         <Card className="glass-card border-0"><CardContent className="py-10 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></CardContent></Card>
       ) : (
         <>
+          {isPexJbp && (
+            <Card className="glass-card border-0">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><GitCompareArrows className="h-5 w-5 text-primary" />Evolução entre visitas</CardTitle>
+                <CardDescription>
+                  Compara as duas visitas mais recentes de cada loja. Não = ruim, Parcial = atenção e Sim = bom. Pontos que permaneceram em Sim não aparecem abaixo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+                    <p className="text-sm text-muted-foreground flex items-center gap-2"><ArrowUpRight className="h-4 w-4 text-emerald-600" />Melhoraram ou foram resolvidos</p>
+                    <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">{evolutionCounts.positive}</p>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+                    <p className="text-sm text-muted-foreground flex items-center gap-2"><CircleAlert className="h-4 w-4 text-amber-600" />Continuam pendentes</p>
+                    <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-400">{evolutionCounts.pending}</p>
+                  </div>
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/30">
+                    <p className="text-sm text-muted-foreground flex items-center gap-2"><ArrowDownRight className="h-4 w-4 text-red-600" />Pioraram</p>
+                    <p className="mt-1 text-2xl font-bold text-red-700 dark:text-red-400">{evolutionCounts.worsened}</p>
+                  </div>
+                </div>
+
+                {evolutionRows.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    {submissionIds.length === 0
+                      ? "Nenhuma visita encontrada para esta rede."
+                      : "Ainda não há duas visitas identificadas para a mesma Rede + Loja neste filtro."}
+                  </div>
+                ) : (
+                  <div className="max-h-[34rem] overflow-auto rounded-lg border">
+                    <table className="w-full min-w-[900px] text-sm">
+                      <thead className="sticky top-0 bg-muted/95 backdrop-blur">
+                        <tr className="border-b text-left">
+                          <th className="p-3 font-medium">Rede</th>
+                          <th className="p-3 font-medium">Loja</th>
+                          <th className="p-3 font-medium">Ponto avaliado</th>
+                          <th className="p-3 font-medium">Anterior</th>
+                          <th className="p-3 font-medium">Atual</th>
+                          <th className="p-3 font-medium">Evolução</th>
+                          <th className="p-3 font-medium">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {evolutionRows.map((row, index) => (
+                          <tr key={`${row.currentSubmissionId}-${row.question}-${index}`} className="border-b last:border-0 align-top">
+                            <td className="p-3 font-medium">{row.network}</td>
+                            <td className="p-3">{row.store}</td>
+                            <td className="p-3"><span className="font-medium">{row.question}</span><span className="mt-1 block text-xs text-muted-foreground">{row.section}</span></td>
+                            <td className="p-3">{row.previous}<span className="mt-1 block text-xs text-muted-foreground">{formatDateOnlyPtBR(row.previousDate)}</span></td>
+                            <td className="p-3">{row.current}<span className="mt-1 block text-xs text-muted-foreground">{formatDateOnlyPtBR(row.currentDate)}</span></td>
+                            <td className="p-3">
+                              <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                row.status === "worsened" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" :
+                                row.status === "pending" ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" :
+                                "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                              }`}>{evolutionLabel[row.status]}</span>
+                            </td>
+                            <td className="p-3"><Button size="sm" variant="outline" onClick={() => drill(`${row.network} · ${row.store}`, [row.currentSubmissionId])}>Ver visita</Button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {yesNoStats.length > 0 && (
             <div className="grid gap-3 md:grid-cols-2">
               <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />Pontos fortes</CardTitle><CardDescription>Maior % de "Sim"</CardDescription></CardHeader>
