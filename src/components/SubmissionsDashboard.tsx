@@ -48,6 +48,14 @@ const displayPexAnswer = (value: unknown) => {
   return score === 0 ? "Não" : score === 1 ? "Parcial" : score === 2 ? "Sim" : String(value ?? "—");
 };
 
+const formatPersonName = (value: unknown) => {
+  const clean = String(value ?? "")
+    .replace(/^(?:GERENTE|SUPERVISOR|COORDENADOR|[A-Z]\d*)\s*-\s*/i, "")
+    .trim();
+  if (!clean) return "";
+  return clean.toLocaleLowerCase("pt-BR").replace(/(^|[\s'-])\p{L}/gu, letter => letter.toLocaleUpperCase("pt-BR"));
+};
+
 const evolutionLabel: Record<EvolutionStatus, string> = {
   resolved: "Resolvido",
   improved: "Melhorou",
@@ -74,6 +82,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   const [responses, setResponses] = useState<{ submission_id: string; question_id: string; response_value: any }[]>([]);
   const [loading, setLoading] = useState(true);
   const [pexNetwork, setPexNetwork] = useState<PexNetwork>("all");
+  const [teamMemberNames, setTeamMemberNames] = useState<Record<string, string>>({});
   const allSubmissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
   const isPexJbp = /pex.*j(?:bp|pb)/i.test(templateName);
 
@@ -121,6 +130,9 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
 
   const clientQ = useMemo(() => questions.find(q => /rede|cliente/i.test(q.label) && !CHOICE.includes(q.question_type) && !NUMERIC.includes(q.question_type)), [questions]);
   const storeQ = useMemo(() => questions.find(q => normalizeText(q.label) === "loja"), [questions]);
+  const responsibleQuestions = useMemo(() => questions.filter(q =>
+    q.question_type === "team_select" && /(gerente|supervisor)/i.test(normalizeText(q.label))
+  ), [questions]);
 
   const allPerSub = useMemo(() => submissions.map(s => {
     const ans = bySub.get(s.id) || new Map();
@@ -131,6 +143,14 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     const client = String(typeof rawClient === "object" ? JSON.stringify(rawClient) : rawClient).trim() || "Não informado";
     const rawStore = (storeQ && ans.get(storeQ.id)) || md.store || md.loja || "";
     const store = String(typeof rawStore === "object" ? JSON.stringify(rawStore) : rawStore).trim() || client;
+    const selectedResponsibles = responsibleQuestions.flatMap(question => {
+      const code = String(ans.get(question.id) ?? "").trim();
+      if (!code) return [];
+      const role = normalizeText(question.label).includes("supervisor") ? "Supervisor" : "Gerente";
+      const selectedName = formatPersonName(teamMemberNames[code] || code);
+      return selectedName ? [`${selectedName} (${role})`] : [];
+    });
+    const selectedResponsible = [...new Set(selectedResponsibles)].join(" • ");
     return {
       s,
       score,
@@ -138,10 +158,10 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       client,
       store,
       network: identifyPexNetwork(client),
-      who: names[s.created_by || ""] || "Sem colaborador",
+      who: selectedResponsible || names[s.created_by || ""] || "Sem responsável identificado",
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [submissions, bySub, qMap, clientQ, storeQ, names]);
+  }), [submissions, bySub, qMap, clientQ, storeQ, responsibleQuestions, teamMemberNames, names]);
 
   const perSub = useMemo(
     () => !isPexJbp || pexNetwork === "all" ? allPerSub : allPerSub.filter(p => p.network === pexNetwork),
@@ -202,10 +222,17 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
 
   const [rcaNames, setRcaNames] = useState<Record<string, string>>({});
   useEffect(() => {
-    supabase.from("teams_vendors").select("cod_rca_lopes, nome_rca").then(({ data }) => {
-      const m: Record<string, string> = {};
-      (data || []).forEach((r: any) => { if (r.nome_rca) m[String(r.cod_rca_lopes)] = r.nome_rca; });
-      setRcaNames(m);
+    supabase.from("teams_vendors").select("cod_rca_lopes, nome_rca, cargo").then(({ data }) => {
+      const vendorMap: Record<string, string> = {};
+      const memberMap: Record<string, string> = {};
+      (data || []).forEach((row: any) => {
+        if (!row.nome_rca) return;
+        const code = String(row.cod_rca_lopes);
+        vendorMap[code] = row.nome_rca;
+        if (row.cargo !== "vendedor") memberMap[code] = row.nome_rca;
+      });
+      setRcaNames(vendorMap);
+      setTeamMemberNames(memberMap);
     });
   }, []);
   const opportunities = useMemo(() => {
@@ -359,9 +386,9 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       ? resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: "Média", Quantidade: s.answered, Percentual: Number(s.avg.toFixed(2)) })
       : s.opts.forEach((o: any) => resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: o.label, Quantidade: o.count, Percentual: s.answered ? Math.round(o.count / s.answered * 100) : 0 })));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), "Resumo por pergunta");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ Data: formatDateOnlyPtBR(p.s.visit_date), Colaborador: p.who, Rede: p.network, Loja: p.store, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Endereço: p.s.address || "" }))), "Registros");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ Data: formatDateOnlyPtBR(p.s.visit_date), "Responsável selecionado": p.who, Rede: p.network, Loja: p.store, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Endereço: p.s.address || "" }))), "Registros");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clients.map(c => ({ "Rede/Cliente": c.name, Visitas: c.ids.length, "Respostas Não": c.no, "Resultado médio (% Sim)": c.avg ?? "" }))), "Clientes com atenção");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ranking.map(([n, ids]) => ({ Colaborador: n, Registros: ids.length }))), "Por colaborador");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ranking.map(([n, ids]) => ({ "Responsável selecionado": n, Registros: ids.length }))), "Por responsável");
     if (opportunities) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(opportunities.rankingWho.map(r => ({ RCA: r.who, "Oportunidades registradas": r.total, "Visitas com oportunidade": r.ids.length, "Quais": r.items.map(([l, n]) => n > 1 ? `${l} (${n})` : l).join("; ") }))), "Oportunidades");
     }
@@ -399,7 +426,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     }
     if (best.length) { line("Pontos fortes", 11, true); best.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
     if (worst.length) { line("Pontos de atenção", 11, true); worst.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
-    line("Registros por colaborador", 11, true); ranking.forEach(([n, ids]) => line(`- ${n}: ${ids.length}`)); y += 3;
+    line("Registros por responsável selecionado", 11, true); ranking.forEach(([n, ids]) => line(`- ${n}: ${ids.length}`)); y += 3;
     if (clients.length) { line("Clientes com mais pontos de atenção", 11, true); clients.forEach(c => line(`- ${c.name}: ${c.no} resposta(s) Não em ${c.ids.length} visita(s)${c.avg !== null ? ` · ${c.avg}% Sim` : ""}`)); y += 3; }
     missing.forEach(m => { line(`Itens mais ausentes - ${m.s.q.label}`, 11, true); m.items.forEach((o: any) => line(`- ${o.label}: ausente em ${o.missing} de ${m.s.answered}`)); y += 3; });
     if (opportunities) {
@@ -558,8 +585,8 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
                   ))}
                 </CardContent></Card>
             )}
-            <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base">Registros por colaborador</CardTitle><CardDescription>{submissionIds.length} no filtro</CardDescription></CardHeader>
-              <CardContent className="space-y-2">{ranking.map(([n, ids]) => <Bar key={n} label={n} value={ids.length} total={submissionIds.length} onClick={() => drill(`Colaborador: ${n}`, ids)} />)}</CardContent></Card>
+            <Card className="glass-card border-0"><CardHeader className="pb-2"><CardTitle className="text-base">Registros por responsável selecionado</CardTitle><CardDescription>{submissionIds.length} no filtro</CardDescription></CardHeader>
+              <CardContent className="space-y-2">{ranking.map(([n, ids]) => <Bar key={n} label={n} value={ids.length} total={submissionIds.length} onClick={() => drill(`Responsável: ${n}`, ids)} />)}</CardContent></Card>
           </div>
 
           {missing.length > 0 && (
