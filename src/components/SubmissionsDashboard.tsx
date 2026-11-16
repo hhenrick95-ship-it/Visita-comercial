@@ -347,7 +347,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       ? resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: "Média", Quantidade: s.answered, Percentual: Number(s.avg.toFixed(2)) })
       : s.opts.forEach((o: any) => resumo.push({ Seção: s.q.section, Pergunta: s.q.label, Resposta: o.label, Quantidade: o.count, Percentual: s.answered ? Math.round(o.count / s.answered * 100) : 0 })));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), "Resumo por pergunta");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ Data: formatDateOnlyPtBR(p.s.visit_date), "Responsável selecionado": p.who, Rede: p.network, Loja: p.store, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Endereço: p.s.address || "" }))), "Registros");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perSub.map(p => ({ "ID do envio": p.s.id, Data: formatDateOnlyPtBR(p.s.visit_date), "Responsável selecionado": p.who, Rede: p.network, Loja: p.store, "Rede/Cliente": p.client, "Resultado (% Sim)": p.score ?? "", "Respostas Não": p.noCount, Latitude: p.s.latitude ?? "", Longitude: p.s.longitude ?? "", Endereço: p.s.address || "" }))), "Registros");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clients.map(c => ({ "Rede/Cliente": c.name, Visitas: c.ids.length, "Respostas Não": c.no, "Resultado médio (% Sim)": c.avg ?? "" }))), "Clientes com atenção");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ranking.map(([n, ids]) => ({ "Responsável selecionado": n, Registros: ids.length }))), "Por responsável");
     if (opportunities) {
