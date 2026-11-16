@@ -3,7 +3,7 @@ import * as XLSX from "@e965/xlsx";
 import jsPDF from "jspdf";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Loader2, TrendingUp, AlertTriangle, Store, PackageX, Map as MapIcon, FileSpreadsheet, FileDown, Lightbulb, ArrowUpRight, ArrowDownRight, CircleAlert, GitCompareArrows } from "lucide-react";
+import { BarChart3, Loader2, TrendingUp, AlertTriangle, Store, PackageX, Map as MapIcon, FileSpreadsheet, FileDown, Lightbulb, GitCompareArrows } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDateOnlyPtBR } from "@/lib/utils";
 import { yesScore } from "@/lib/submissionScore";
@@ -20,7 +20,7 @@ const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
 const asList = (v: any) => (Array.isArray(v) ? v : [v]).map(norm);
 
 type PexNetwork = "all" | "DB" | "Baratão";
-type EvolutionStatus = "resolved" | "improved" | "pending" | "worsened";
+type NetworkLeader = "db" | "tie" | "baratao";
 
 const normalizeText = (value: unknown) => String(value ?? "")
   .trim()
@@ -43,11 +43,6 @@ const pexAnswerScore = (value: unknown): number | null => {
   return null;
 };
 
-const displayPexAnswer = (value: unknown) => {
-  const score = pexAnswerScore(value);
-  return score === 0 ? "Não" : score === 1 ? "Parcial" : score === 2 ? "Sim" : String(value ?? "—");
-};
-
 const formatPersonName = (value: unknown) => {
   const clean = String(value ?? "")
     .replace(/^(?:GERENTE|SUPERVISOR|COORDENADOR|[A-Z]\d*)\s*-\s*/i, "")
@@ -56,11 +51,10 @@ const formatPersonName = (value: unknown) => {
   return clean.toLocaleLowerCase("pt-BR").replace(/(^|[\s'-])\p{L}/gu, letter => letter.toLocaleUpperCase("pt-BR"));
 };
 
-const evolutionLabel: Record<EvolutionStatus, string> = {
-  resolved: "Resolvido",
-  improved: "Melhorou",
-  pending: "Continua pendente",
-  worsened: "Piorou",
+const networkLeaderLabel: Record<NetworkLeader, string> = {
+  db: "DB à frente",
+  tie: "Empate",
+  baratao: "Baratão à frente",
 };
 
 function Bar({ label, value, total, tone = "primary", onClick }: { label: string; value: number; total: number; tone?: "primary" | "destructive" | "success"; onClick?: () => void }) {
@@ -285,82 +279,49 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     return values.includes("sim") && values.includes("parcial") && values.includes("nao");
   }), [isPexJbp, questions]);
 
-  const evolutionRows = useMemo(() => {
+  const networkComparisonRows = useMemo(() => {
     if (!isPexJbp || !pexAssessmentQuestions.length) return [];
-    const grouped = new Map<string, typeof perSub>();
-    perSub.forEach(item => {
-      if (item.network === "Outras") return;
-      grouped.set(item.network, [...(grouped.get(item.network) || []), item]);
-    });
+    const dbVisits = allPerSub.filter(item => item.network === "DB");
+    const barataoVisits = allPerSub.filter(item => item.network === "Baratão");
 
-    const rows: {
-      network: string;
-      previousStore: string;
-      currentStore: string;
-      question: string;
-      section: string;
-      previous: string;
-      current: string;
-      previousDate: string;
-      currentDate: string;
-      status: EvolutionStatus;
-      currentSubmissionId: string;
-    }[] = [];
-
-    grouped.forEach(visits => {
-      if (visits.length < 2) return;
-      const ordered = [...visits].sort((a, b) =>
-        a.s.visit_date.localeCompare(b.s.visit_date) ||
-        String(a.s.submitted_at || "").localeCompare(String(b.s.submitted_at || "")),
-      );
-      const previousVisit = ordered[ordered.length - 2];
-      const currentVisit = ordered[ordered.length - 1];
-      const previousAnswers = bySub.get(previousVisit.s.id) || new Map();
-      const currentAnswers = bySub.get(currentVisit.s.id) || new Map();
-
-      pexAssessmentQuestions.forEach(question => {
-        const previous = previousAnswers.get(question.id);
-        const current = currentAnswers.get(question.id);
-        const previousScore = pexAnswerScore(previous);
-        const currentScore = pexAnswerScore(current);
-        if (previousScore === null || currentScore === null) return;
-        // "Sim" nas duas visitas já está saudável e não precisa ocupar a lista de evolução.
-        if (previousScore === 2 && currentScore === 2) return;
-
-        let status: EvolutionStatus;
-        if (currentScore > previousScore) status = previousScore === 0 && currentScore === 2 ? "resolved" : "improved";
-        else if (currentScore < previousScore) status = "worsened";
-        else status = "pending";
-
-        rows.push({
-          network: currentVisit.network,
-          previousStore: previousVisit.store,
-          currentStore: currentVisit.store,
-          question: question.label,
-          section: question.section,
-          previous: displayPexAnswer(previous),
-          current: displayPexAnswer(current),
-          previousDate: previousVisit.s.visit_date,
-          currentDate: currentVisit.s.visit_date,
-          status,
-          currentSubmissionId: currentVisit.s.id,
-        });
+    return pexAssessmentQuestions.flatMap(question => {
+      const scoresFor = (visits: typeof allPerSub) => visits.flatMap(item => {
+        const score = pexAnswerScore(bySub.get(item.s.id)?.get(question.id));
+        return score === null ? [] : [score];
       });
-    });
+      const dbScores = scoresFor(dbVisits);
+      const barataoScores = scoresFor(barataoVisits);
+      if (!dbScores.length || !barataoScores.length) return [];
 
-    const priority: Record<EvolutionStatus, number> = { worsened: 0, pending: 1, improved: 2, resolved: 3 };
-    return rows.sort((a, b) =>
-      priority[a.status] - priority[b.status] ||
-      a.network.localeCompare(b.network, "pt-BR") ||
-      a.question.localeCompare(b.question, "pt-BR"),
+      const averagePercent = (scores: number[]) => Math.round(
+        (scores.reduce((sum, score) => sum + score, 0) / scores.length / 2) * 100,
+      );
+      const dbPercent = averagePercent(dbScores);
+      const barataoPercent = averagePercent(barataoScores);
+      const difference = dbPercent - barataoPercent;
+      const leader: NetworkLeader = difference > 0 ? "db" : difference < 0 ? "baratao" : "tie";
+
+      return [{
+        question: question.label,
+        section: question.section,
+        dbPercent,
+        dbAnswers: dbScores.length,
+        barataoPercent,
+        barataoAnswers: barataoScores.length,
+        difference: Math.abs(difference),
+        leader,
+      }];
+    }).sort((a, b) =>
+      b.difference - a.difference || a.question.localeCompare(b.question, "pt-BR"),
     );
-  }, [bySub, isPexJbp, perSub, pexAssessmentQuestions]);
+  }, [allPerSub, bySub, isPexJbp, pexAssessmentQuestions]);
 
-  const evolutionCounts = useMemo(() => ({
-    positive: evolutionRows.filter(row => row.status === "resolved" || row.status === "improved").length,
-    pending: evolutionRows.filter(row => row.status === "pending").length,
-    worsened: evolutionRows.filter(row => row.status === "worsened").length,
-  }), [evolutionRows]);
+  const networkComparisonCounts = useMemo(() => ({
+    db: networkComparisonRows.filter(row => row.leader === "db").length,
+    tie: networkComparisonRows.filter(row => row.leader === "tie").length,
+    baratao: networkComparisonRows.filter(row => row.leader === "baratao").length,
+  }), [networkComparisonRows]);
+  const networkComparisonReady = networkCounts.DB > 0 && networkCounts.Baratão > 0;
 
   const yesNoStats = stats.filter(s => s.kind === "choice" && s.yesNo && s.answered > 0)
     .map(s => { const o = s.opts.find((x: any) => x.value === "sim"); const n = s.opts.find((x: any) => x.value === "nao"); return { label: s.q.label, pct: Math.round((o.count / s.answered) * 100), yesIds: o.ids, noIds: n?.ids || [] }; });
@@ -392,19 +353,17 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     if (opportunities) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(opportunities.rankingWho.map(r => ({ RCA: r.who, "Oportunidades registradas": r.total, "Visitas com oportunidade": r.ids.length, "Quais": r.items.map(([l, n]) => n > 1 ? `${l} (${n})` : l).join("; ") }))), "Oportunidades");
     }
-    if (isPexJbp && evolutionRows.length) {
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(evolutionRows.map(row => ({
-        Rede: row.network,
-        "Loja anterior": row.previousStore,
-        "Loja atual": row.currentStore,
+    if (isPexJbp && networkComparisonRows.length) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(networkComparisonRows.map(row => ({
         Seção: row.section,
         "Ponto avaliado": row.question,
-        "Data anterior": formatDateOnlyPtBR(row.previousDate),
-        "Resposta anterior": row.previous,
-        "Data atual": formatDateOnlyPtBR(row.currentDate),
-        "Resposta atual": row.current,
-        Evolução: evolutionLabel[row.status],
-      }))), "Evolução PEX");
+        "DB - resultado médio (%)": row.dbPercent,
+        "DB - respostas": row.dbAnswers,
+        "Baratão - resultado médio (%)": row.barataoPercent,
+        "Baratão - respostas": row.barataoAnswers,
+        "Diferença (p.p.)": row.difference,
+        Resultado: networkLeaderLabel[row.leader],
+      }))), "Comparativo DB x Baratão");
     }
     XLSX.writeFile(wb, `painel-${templateName.replace(/[^\w]+/g, "-").toLowerCase()}.xlsx`);
   };
@@ -420,8 +379,8 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     line(`${submissionIds.length} registro(s) no filtro · gerado em ${new Date().toLocaleString("pt-BR")}`); y += 4;
     if (isPexJbp) {
       line(`Rede: ${pexNetwork === "all" ? "Todas" : pexNetwork}`, 10, true);
-      line(`Evolução: ${evolutionCounts.positive} melhorado(s)/resolvido(s), ${evolutionCounts.pending} pendente(s), ${evolutionCounts.worsened} piora(s).`);
-      evolutionRows.forEach(row => line(`- ${row.network} · ${row.previousStore} -> ${row.currentStore} · ${row.question}: ${row.previous} -> ${row.current} (${evolutionLabel[row.status]})`, 8));
+      line(`Comparativo DB x Baratão: DB lidera em ${networkComparisonCounts.db} ponto(s), há ${networkComparisonCounts.tie} empate(s) e Baratão lidera em ${networkComparisonCounts.baratao} ponto(s).`);
+      networkComparisonRows.forEach(row => line(`- ${row.question}: DB ${row.dbPercent}% x Baratão ${row.barataoPercent}% (${networkLeaderLabel[row.leader]})`, 8));
       y += 3;
     }
     if (best.length) { line("Pontos fortes", 11, true); best.forEach(b => line(`- ${b.label}: ${b.pct}% Sim`)); y += 3; }
@@ -457,7 +416,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
         <Card className="glass-card border-0">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Filtro por rede</CardTitle>
-            <CardDescription>O filtro afeta os indicadores, a evolução, o mapa, as exportações e a lista de registros.</CardDescription>
+            <CardDescription>O filtro afeta os demais indicadores, o mapa, as exportações e a lista de registros. O comparativo DB × Baratão permanece visível com as duas redes.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {([
@@ -485,63 +444,57 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
           {isPexJbp && (
             <Card className="glass-card border-0">
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2"><GitCompareArrows className="h-5 w-5 text-primary" />Evolução entre visitas</CardTitle>
+                <CardTitle className="text-base flex items-center gap-2"><GitCompareArrows className="h-5 w-5 text-primary" />Comparativo entre redes — DB × Baratão</CardTitle>
                 <CardDescription>
-                  Compara as duas visitas mais recentes de cada rede, mesmo quando ocorreram em lojas diferentes. Não = ruim, Parcial = atenção e Sim = bom. Pontos que permaneceram em Sim não aparecem abaixo.
+                  Compara o resultado médio de todas as visitas de cada rede, ponto por ponto. Não vale 0%, Parcial vale 50% e Sim vale 100%.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
-                    <p className="text-sm text-muted-foreground flex items-center gap-2"><ArrowUpRight className="h-4 w-4 text-emerald-600" />Melhoraram ou foram resolvidos</p>
-                    <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-400">{evolutionCounts.positive}</p>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/30">
+                    <p className="text-sm text-muted-foreground">Pontos em que DB lidera</p>
+                    <p className="mt-1 text-2xl font-bold text-blue-700 dark:text-blue-400">{networkComparisonCounts.db}</p>
                   </div>
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
-                    <p className="text-sm text-muted-foreground flex items-center gap-2"><CircleAlert className="h-4 w-4 text-amber-600" />Continuam pendentes</p>
-                    <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-400">{evolutionCounts.pending}</p>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/30">
+                    <p className="text-sm text-muted-foreground">Pontos empatados</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-700 dark:text-slate-300">{networkComparisonCounts.tie}</p>
                   </div>
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/30">
-                    <p className="text-sm text-muted-foreground flex items-center gap-2"><ArrowDownRight className="h-4 w-4 text-red-600" />Pioraram</p>
-                    <p className="mt-1 text-2xl font-bold text-red-700 dark:text-red-400">{evolutionCounts.worsened}</p>
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 dark:border-violet-900 dark:bg-violet-950/30">
+                    <p className="text-sm text-muted-foreground">Pontos em que Baratão lidera</p>
+                    <p className="mt-1 text-2xl font-bold text-violet-700 dark:text-violet-400">{networkComparisonCounts.baratao}</p>
                   </div>
                 </div>
 
-                {evolutionRows.length === 0 ? (
+                {networkComparisonRows.length === 0 ? (
                   <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    {submissionIds.length === 0
-                      ? "Nenhuma visita encontrada para esta rede."
-                      : "Ainda não há duas visitas identificadas para a mesma rede neste filtro."}
+                    {networkComparisonReady
+                      ? "As duas redes possuem visitas, mas ainda não há pontos avaliados em comum para comparar."
+                      : "Para comparar as redes, precisamos de pelo menos uma visita identificada da DB e uma do Baratão neste filtro."}
                   </div>
                 ) : (
                   <div className="max-h-[34rem] overflow-auto rounded-lg border">
-                    <table className="w-full min-w-[900px] text-sm">
+                    <table className="w-full min-w-[760px] text-sm">
                       <thead className="sticky top-0 bg-muted/95 backdrop-blur">
                         <tr className="border-b text-left">
-                          <th className="p-3 font-medium">Rede</th>
-                          <th className="p-3 font-medium">Lojas comparadas</th>
                           <th className="p-3 font-medium">Ponto avaliado</th>
-                          <th className="p-3 font-medium">Anterior</th>
-                          <th className="p-3 font-medium">Atual</th>
-                          <th className="p-3 font-medium">Evolução</th>
-                          <th className="p-3 font-medium">Ação</th>
+                          <th className="p-3 font-medium">DB</th>
+                          <th className="p-3 font-medium">Baratão</th>
+                          <th className="p-3 font-medium">Comparação</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {evolutionRows.map((row, index) => (
-                          <tr key={`${row.currentSubmissionId}-${row.question}-${index}`} className="border-b last:border-0 align-top">
-                            <td className="p-3 font-medium">{row.network}</td>
-                            <td className="p-3"><span className="block">Anterior: {row.previousStore}</span><span className="mt-1 block">Atual: {row.currentStore}</span></td>
+                        {networkComparisonRows.map(row => (
+                          <tr key={row.question} className="border-b last:border-0 align-top">
                             <td className="p-3"><span className="font-medium">{row.question}</span><span className="mt-1 block text-xs text-muted-foreground">{row.section}</span></td>
-                            <td className="p-3">{row.previous}<span className="mt-1 block text-xs text-muted-foreground">{formatDateOnlyPtBR(row.previousDate)}</span></td>
-                            <td className="p-3">{row.current}<span className="mt-1 block text-xs text-muted-foreground">{formatDateOnlyPtBR(row.currentDate)}</span></td>
+                            <td className="p-3"><span className="font-semibold">{row.dbPercent}%</span><span className="mt-1 block text-xs text-muted-foreground">{row.dbAnswers} resposta(s)</span></td>
+                            <td className="p-3"><span className="font-semibold">{row.barataoPercent}%</span><span className="mt-1 block text-xs text-muted-foreground">{row.barataoAnswers} resposta(s)</span></td>
                             <td className="p-3">
                               <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                row.status === "worsened" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" :
-                                row.status === "pending" ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" :
-                                "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                              }`}>{evolutionLabel[row.status]}</span>
+                                row.leader === "db" ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300" :
+                                row.leader === "baratao" ? "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300" :
+                                "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                              }`}>{networkLeaderLabel[row.leader]}{row.difference > 0 ? ` por ${row.difference} p.p.` : ""}</span>
                             </td>
-                            <td className="p-3"><Button size="sm" variant="outline" onClick={() => drill(`${row.network} · ${row.currentStore}`, [row.currentSubmissionId])}>Ver visita</Button></td>
                           </tr>
                         ))}
                       </tbody>
