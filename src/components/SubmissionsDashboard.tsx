@@ -8,11 +8,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatDateOnlyPtBR } from "@/lib/utils";
 import { yesScore } from "@/lib/submissionScore";
 import { SubmissionsResultsMap, type MapPoint } from "@/components/SubmissionsResultsMap";
+import { HistoricalLocationCorrection, type EligibleLocationSubmission } from "@/components/HistoricalLocationCorrection";
 
 interface Question { id: string; label: string; question_type: string; options: any; section: string; order: number }
 export interface DashSubmission { id: string; visit_date: string; submitted_at?: string; created_by: string | null; latitude: number | null; longitude: number | null; address: string | null; metadata: any }
 export interface Drill { label: string; ids: string[] }
-interface Props { templateId: string; templateName: string; submissions: DashSubmission[]; names: Record<string, string>; onDrill: (d: Drill | null) => void }
+interface Props { templateId: string; templateName: string; submissions: DashSubmission[]; names: Record<string, string>; onDrill: (d: Drill | null) => void; onDataChanged?: () => void | Promise<void> }
 
 const CHOICE = ["radio", "select", "multi_select", "checkbox"];
 const NUMERIC = ["slider", "scale", "rating", "number"];
@@ -71,7 +72,7 @@ function Bar({ label, value, total, tone = "primary", onClick }: { label: string
     : <div className="space-y-1">{body}</div>;
 }
 
-export function SubmissionsDashboard({ templateId, templateName, submissions, names, onDrill }: Props) {
+export function SubmissionsDashboard({ templateId, templateName, submissions, names, onDrill, onDataChanged }: Props) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [responses, setResponses] = useState<{ submission_id: string; question_id: string; response_value: any }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +80,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   const [teamMemberNames, setTeamMemberNames] = useState<Record<string, string>>({});
   const allSubmissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
   const isPexJbp = /pex.*j(?:bp|pb)/i.test(templateName);
+  const isPexManager = /pex.*visita.*gerente/i.test(normalizeText(templateName));
 
   useEffect(() => {
     let active = true;
@@ -161,6 +163,15 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     () => !isPexJbp || pexNetwork === "all" ? allPerSub : allPerSub.filter(p => p.network === pexNetwork),
     [allPerSub, isPexJbp, pexNetwork],
   );
+  const locationCorrectionEligible = useMemo<EligibleLocationSubmission[]>(() => allPerSub
+    .filter(item => normalizeText(item.who).includes("alexandre frasson") && /^\d+$/.test(item.store))
+    .map(item => ({
+      id: item.s.id,
+      clientCode: item.store,
+      latitude: item.s.latitude,
+      longitude: item.s.longitude,
+      address: item.s.address,
+    })), [allPerSub]);
   const submissionIds = useMemo(() => perSub.map(p => p.s.id), [perSub]);
   const filteredKey = submissionIds.join(",");
   const networkCounts = useMemo(() => ({
@@ -436,6 +447,13 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
             ))}
           </CardContent>
         </Card>
+      )}
+      {isPexManager && !loading && locationCorrectionEligible.length > 0 && (
+        <HistoricalLocationCorrection
+          templateId={templateId}
+          eligibleSubmissions={locationCorrectionEligible}
+          onCompleted={onDataChanged}
+        />
       )}
       {loading ? (
         <Card className="glass-card border-0"><CardContent className="py-10 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></CardContent></Card>
