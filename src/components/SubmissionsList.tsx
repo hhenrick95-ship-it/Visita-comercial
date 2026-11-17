@@ -198,7 +198,7 @@ export function SubmissionsList({ template }: Props) {
         <Button variant="outline" onClick={clearFilters} className="min-h-11">Limpar filtros</Button>
       </section>
 
-      <SubmissionsDashboard templateId={template.id} templateName={template.name} submissions={filtered} names={names} onDrill={setDrill} onDataChanged={reload} />
+      <SubmissionsDashboard templateId={template.id} templateName={template.name} submissions={filtered} names={names} onDrill={setDrill} />
 
       {/* Search */}
       <div className="relative max-w-md">
