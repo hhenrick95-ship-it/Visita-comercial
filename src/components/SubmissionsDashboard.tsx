@@ -12,7 +12,7 @@ import { SubmissionsResultsMap, type MapPoint } from "@/components/SubmissionsRe
 interface Question { id: string; label: string; question_type: string; options: any; section: string; order: number }
 export interface DashSubmission { id: string; visit_date: string; submitted_at?: string; created_by: string | null; latitude: number | null; longitude: number | null; address: string | null; metadata: any }
 export interface Drill { label: string; ids: string[] }
-interface Props { templateId: string; templateName: string; submissions: DashSubmission[]; names: Record<string, string>; onDrill: (d: Drill | null) => void }
+interface Props { templateId: string; templateName: string; submissions: DashSubmission[]; names: Record<string, string>; onDrill: (d: Drill | null) => void; onResponsiblesChange?: (responsibles: Record<string, string>) => void }
 
 const CHOICE = ["radio", "select", "multi_select", "checkbox"];
 const NUMERIC = ["slider", "scale", "rating", "number"];
@@ -71,7 +71,7 @@ function Bar({ label, value, total, tone = "primary", onClick }: { label: string
     : <div className="space-y-1">{body}</div>;
 }
 
-export function SubmissionsDashboard({ templateId, templateName, submissions, names, onDrill }: Props) {
+export function SubmissionsDashboard({ templateId, templateName, submissions, names, onDrill, onResponsiblesChange }: Props) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [responses, setResponses] = useState<{ submission_id: string; question_id: string; response_value: any }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +79,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   const [teamMemberNames, setTeamMemberNames] = useState<Record<string, string>>({});
   const allSubmissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
   const isPexJbp = /pex.*j(?:bp|pb)/i.test(templateName);
+  const usesRouteResponsible = /pex.*visita.*(gerente|supervisor)/i.test(normalizeText(templateName));
 
   useEffect(() => {
     let active = true;
@@ -144,7 +145,16 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       const selectedName = formatPersonName(teamMemberNames[code] || code);
       return selectedName ? [`${selectedName} (${role})`] : [];
     });
-    const selectedResponsible = [...new Set(selectedResponsibles)].join(" • ");
+    const metadataResponsibles = [
+      { value: md.manager ?? md.gerente ?? md.manager_name, role: "Gerente" },
+      { value: md.supervisor ?? md.supervisor_rota ?? md.supervisor_name, role: "Supervisor" },
+    ].flatMap(({ value, role }) => {
+      if (value === undefined || value === null || value === "" || typeof value === "object") return [];
+      const codeOrName = String(value).trim();
+      const selectedName = formatPersonName(teamMemberNames[codeOrName] || codeOrName);
+      return selectedName ? [`${selectedName} (${role})`] : [];
+    });
+    const selectedResponsible = [...new Set([...selectedResponsibles, ...metadataResponsibles])].join(" • ");
     return {
       s,
       score,
@@ -152,10 +162,15 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       client,
       store,
       network: identifyPexNetwork(client),
-      who: selectedResponsible || names[s.created_by || ""] || "Sem responsável identificado",
+      who: selectedResponsible || (usesRouteResponsible ? "Responsável da rota não informado" : names[s.created_by || ""] || "Sem responsável identificado"),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [submissions, bySub, qMap, clientQ, storeQ, responsibleQuestions, teamMemberNames, names]);
+  }), [submissions, bySub, qMap, clientQ, storeQ, responsibleQuestions, teamMemberNames, names, usesRouteResponsible]);
+
+  useEffect(() => {
+    if (!onResponsiblesChange) return;
+    onResponsiblesChange(Object.fromEntries(allPerSub.map(item => [item.s.id, item.who])));
+  }, [allPerSub, onResponsiblesChange]);
 
   const perSub = useMemo(
     () => !isPexJbp || pexNetwork === "all" ? allPerSub : allPerSub.filter(p => p.network === pexNetwork),

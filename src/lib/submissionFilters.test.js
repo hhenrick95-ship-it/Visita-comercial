@@ -18,6 +18,10 @@ test("collaborator means the person who submitted, not the supervisor answer", (
   assert.equal(matchesSubmissionFilters(record, { ...empty, collaborators: ["sidney"] }), true);
   assert.equal(matchesSubmissionFilters(record, { ...empty, collaborators: ["outro"] }), false);
 });
+test("a custom responsible key can replace the login in route forms", () => {
+  assert.equal(matchesSubmissionFilters(record, { ...empty, collaborators: ["Alexandre Frasson"] }, "Alexandre Frasson", "Alexandre Frasson"), true);
+  assert.equal(matchesSubmissionFilters(record, { ...empty, collaborators: ["sidney"] }, "Alexandre Frasson", "Alexandre Frasson"), false);
+});
 test("cleared filters keep all records", () => {
   assert.equal(matchesSubmissionFilters(record, empty), true);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,12 @@ interface Props {
   template: FormTemplate;
 }
 
+const normalizeLabel = (value: unknown) => String(value ?? "")
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .trim()
+  .toLocaleLowerCase("pt-BR");
+
 /**
  * Lists submissions for a non-"visita" template. Provides search, KPIs and
  * per-row PDF download.
@@ -39,6 +45,7 @@ interface Props {
 export function SubmissionsList({ template }: Props) {
   const { submissions, loading, reload } = useFormSubmissions(template.id);
   const { role } = useAuth();
+  const usesRouteResponsible = /pex.*visita.*(gerente|supervisor)/i.test(normalizeLabel(template.name));
   const [search, setSearch] = useState("");
   const [pdfId, setPdfId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -51,7 +58,15 @@ export function SubmissionsList({ template }: Props) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [names, setNames] = useState<Record<string, string>>({});
+  const [responsibleNames, setResponsibleNames] = useState<Record<string, string>>({});
   const [drill, setDrill] = useState<Drill | null>(null);
+
+  const handleResponsiblesChange = useCallback((next: Record<string, string>) => {
+    setResponsibleNames(previous => {
+      if (Object.entries(next).every(([id, name]) => previous[id] === name)) return previous;
+      return { ...previous, ...next };
+    });
+  }, []);
 
   const clearFilters = () => {
     setSearch(""); setYears([]); setMonths([]); setCollaborators([]); setStart(""); setEnd(""); setDrill(null);
@@ -60,6 +75,7 @@ export function SubmissionsList({ template }: Props) {
   useEffect(() => {
     clearFilters();
     setPreviewId(null);
+    setResponsibleNames({});
   }, [template.id]);
 
   useEffect(() => {
@@ -75,13 +91,30 @@ export function SubmissionsList({ template }: Props) {
     return () => { active = false; };
   }, [submissions]);
 
-  const collaboratorOptions = useMemo(() => [...new Set(submissions.map(s => s.created_by || "unknown"))]
-    .map(id => ({ value: id, label: names[id] || (id === "unknown" ? "Sem colaborador" : `Colaborador (${id.slice(0, 8)})`) }))
-    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR")), [submissions, names]);
+  const collaboratorOptions = useMemo(() => {
+    if (usesRouteResponsible) {
+      return [...new Set(submissions.map(s => responsibleNames[s.id] || "Responsável da rota não informado"))]
+        .map(name => ({ value: name, label: name }))
+        .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    }
+    return [...new Set(submissions.map(s => s.created_by || "unknown"))]
+      .map(id => ({ value: id, label: names[id] || (id === "unknown" ? "Sem colaborador" : `Colaborador (${id.slice(0, 8)})`) }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [submissions, names, responsibleNames, usesRouteResponsible]);
 
   const filtered = useMemo(() => {
-    return submissions.filter(s => matchesSubmissionFilters(s, { years, months, collaborators, start, end, search }, names[s.created_by || ""]));
-  }, [submissions, search, years, months, collaborators, start, end, names]);
+    return submissions.filter(s => {
+      const personName = usesRouteResponsible
+        ? responsibleNames[s.id] || "Responsável da rota não informado"
+        : names[s.created_by || ""];
+      const personKey = usesRouteResponsible ? personName : s.created_by || "unknown";
+      return matchesSubmissionFilters(s, { years, months, collaborators, start, end, search }, personName, personKey);
+    });
+  }, [submissions, search, years, months, collaborators, start, end, names, responsibleNames, usesRouteResponsible]);
+
+  const visiblePreviewData = useMemo(() => usesRouteResponsible
+    ? previewData.filter((row: any) => !normalizeLabel(row.form_questions?.label).includes("comentarios adicionais"))
+    : previewData, [previewData, usesRouteResponsible]);
 
   useEffect(() => { setDrill(null); }, [filtered]);
 
@@ -188,9 +221,9 @@ export function SubmissionsList({ template }: Props) {
           <DateTreeFilter availableDates={submissions.map(s => s.visit_date)} selectedYears={years} selectedMonths={months}
             onSelectionChange={(nextYears, nextMonths) => { setYears(nextYears); setMonths(nextMonths); }} />
           <div className="space-y-2 min-w-0">
-            <p className="text-sm font-medium">Colaborador</p>
+            <p className="text-sm font-medium">{usesRouteResponsible ? "Responsável da rota" : "Colaborador"}</p>
             <Combobox options={collaboratorOptions} multiple values={collaborators} onValuesChange={setCollaborators}
-              placeholder="Todos os colaboradores" searchPlaceholder="Buscar colaborador..." className="min-h-11" />
+              placeholder={usesRouteResponsible ? "Todos os responsáveis" : "Todos os colaboradores"} searchPlaceholder={usesRouteResponsible ? "Buscar responsável..." : "Buscar colaborador..."} className="min-h-11" />
           </div>
           <SubmissionDatePicker label="Data inicial" value={start} onChange={setStart} to={end} />
           <SubmissionDatePicker label="Data final" value={end} onChange={setEnd} from={start} />
@@ -198,13 +231,13 @@ export function SubmissionsList({ template }: Props) {
         <Button variant="outline" onClick={clearFilters} className="min-h-11">Limpar filtros</Button>
       </section>
 
-      <SubmissionsDashboard templateId={template.id} templateName={template.name} submissions={filtered} names={names} onDrill={setDrill} />
+      <SubmissionsDashboard templateId={template.id} templateName={template.name} submissions={filtered} names={names} onDrill={setDrill} onResponsiblesChange={usesRouteResponsible ? handleResponsiblesChange : undefined} />
 
       {/* Search */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar por colaborador, endereço ou identificação..."
+          placeholder={usesRouteResponsible ? "Buscar por responsável, endereço ou identificação..." : "Buscar por colaborador, endereço ou identificação..."}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-10"
@@ -251,7 +284,9 @@ export function SubmissionsList({ template }: Props) {
                             <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
                             {formatDateOnlyPtBR(s.visit_date)}
                           </p>
-                          <p className="text-sm mt-1 break-words">{names[s.created_by || ""] || (s.created_by ? "Colaborador não identificado" : "Sem colaborador")}</p>
+                          <p className="text-sm mt-1 break-words">{usesRouteResponsible
+                            ? responsibleNames[s.id] || "Responsável da rota não informado"
+                            : names[s.created_by || ""] || (s.created_by ? "Colaborador não identificado" : "Sem colaborador")}</p>
                           {meta.length > 0 && (
                             <p className="text-xs text-muted-foreground mt-1">
                               {meta.map(([k, v]) => `${k}: ${v}`).join(" • ")}
@@ -311,8 +346,10 @@ export function SubmissionsList({ template }: Props) {
                             <p className="text-xs text-muted-foreground py-2">
                               Carregando...
                             </p>
+                          ) : visiblePreviewData.length === 0 ? (
+                            <p className="text-xs text-muted-foreground py-2">Nenhum detalhe adicional para exibir.</p>
                           ) : (
-                            previewData.map((r: any, i: number) => (
+                            visiblePreviewData.map((r: any, i: number) => (
                               <div
                                 key={i}
                                 className="text-xs grid grid-cols-1 md:grid-cols-3 gap-2 py-1 border-b last:border-0"
