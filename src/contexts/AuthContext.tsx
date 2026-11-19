@@ -149,7 +149,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const signOut = async () => {
     try {
       const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+      // Se o token já expirou ou foi removido, o resultado desejado (sem
+      // sessão) já foi alcançado. Não devemos prender o usuário na tela.
+      if (error && !/auth session missing/i.test(error.message || "")) throw error;
 
       setUser(null);
       setSession(null);
