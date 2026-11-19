@@ -21,10 +21,4 @@ TO authenticated
 USING (
   public.is_approved(auth.uid())
   AND lower(btrim(coalesce(auth.jwt() ->> 'email', ''))) = 'merchan@distribuidoralopes.com'
-  AND EXISTS (
-    SELECT 1
-    FROM public.clientes_cadastro cliente
-    WHERE cliente.codcli = clientes_cadastro_rcas.codcli
-      AND lower(btrim(coalesce(cliente.situacao, ''))) = 'ativo'
-  )
 );
