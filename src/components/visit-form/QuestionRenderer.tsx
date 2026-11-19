@@ -102,13 +102,31 @@ export function QuestionRenderer({ question, form, sectionQuestions, templateSlu
       try {
         const term = clientSearch.trim();
 
-        // O formulário Fotos Ajinomoto usa a busca segura já existente no
-        // backend. Assim a conta limitada pode localizar clientes ativos sem
-        // receber papel de Gestor nem acesso direto às tabelas cadastrais.
+        // O formulário Fotos Ajinomoto consulta diretamente a tabela protegida
+        // pela política RLS específica da conta merchan. A função antiga
+        // search_clientes_pesquisa possui uma restrição interna a Admin/Gestor
+        // e, por isso, retornava uma lista vazia para o papel Usuário.
         if (usesSecureClientSearch) {
-          const { data, error } = await supabase.rpc("search_clientes_pesquisa", {
-            p_term: term || "",
-          });
+          let secureQuery = supabase
+            .from("clientes_cadastro")
+            .select("codcli, razao_social, nome_fantasia, cnpj, cidade, uf")
+            .order("razao_social")
+            .limit(500);
+
+          if (term) {
+            const digits = term.replace(/\D/g, "");
+            const filters = [
+              `razao_social.ilike.%${term}%`,
+              `nome_fantasia.ilike.%${term}%`,
+            ];
+            if (digits) {
+              filters.push(`cnpj.ilike.%${digits}%`);
+              if (digits.length <= 9) filters.push(`codcli.eq.${digits}`);
+            }
+            secureQuery = secureQuery.or(filters.join(","));
+          }
+
+          const { data, error } = await secureQuery;
           if (error) throw error;
           if (cancelled) return;
           setClients(
