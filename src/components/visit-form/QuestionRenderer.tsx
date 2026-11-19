@@ -89,7 +89,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
   // ou via clientes_cadastro_rcas, que guarda vínculos adicionais).
   useEffect(() => {
     if (question.question_type !== "client_select") return;
-    if (vendorFieldKey && !watchedVendorValue) {
+    if (!showClientDetails && vendorFieldKey && !watchedVendorValue) {
       setClients([]);
       return;
     }
@@ -97,6 +97,26 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
     const timer = setTimeout(async () => {
       setLoadingClients(true);
       try {
+        const term = clientSearch.trim();
+
+        // O formulário Fotos Ajinomoto usa a busca segura já existente no
+        // backend. Assim a conta limitada pode localizar clientes ativos sem
+        // receber papel de Gestor nem acesso direto às tabelas cadastrais.
+        if (showClientDetails) {
+          const { data, error } = await supabase.rpc("search_clientes_pesquisa", {
+            p_term: term || "",
+          });
+          if (error) throw error;
+          if (cancelled) return;
+          setClients(
+            (data || []).map((client) => ({
+              value: `${client.codcli} - ${client.razao_social || client.nome_fantasia || client.codcli}${client.cnpj ? ` - CNPJ ${client.cnpj}` : ""}`,
+              label: `${client.codcli} - ${client.razao_social || client.nome_fantasia || client.codcli}${client.cnpj ? ` - CNPJ ${client.cnpj}` : ""}`,
+            })),
+          );
+          return;
+        }
+
         let allowedCodcli: number[] | null = null;
         if (vendorFieldKey && watchedVendorValue) {
           const [{ data: direct, error: directErr }, { data: linked, error: linkedErr }] = await Promise.all([
@@ -115,7 +135,6 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
           }
         }
 
-        const term = clientSearch.trim();
         let query = supabase
           .from("clientes_cadastro")
           .select("codcli, razao_social, nome_fantasia, cidade, uf, cnpj")
@@ -790,8 +809,10 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                   emptyMessage={
                     loadingClients
                       ? "Carregando..."
-                      : vendorFieldKey && !watchedVendorValue
+                      : !showClientDetails && vendorFieldKey && !watchedVendorValue
                         ? "Selecione um RCA primeiro"
+                        : showClientDetails
+                          ? "Nenhum cliente ativo encontrado na base."
                         : vendorFieldKey
                           ? "Nenhum cliente encontrado para este RCA."
                           : "Nenhum cliente encontrado."
@@ -799,7 +820,9 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                 />
               </FormControl>
               <FormDescription>
-                {vendorFieldKey
+                {showClientDetails
+                  ? "Pesquise na base ativa por código, razão social ou CNPJ."
+                  : vendorFieldKey
                   ? "Lista restrita aos clientes do RCA selecionado. Digite parte do nome, CNPJ ou código para filtrar."
                   : "Digite parte do nome, CNPJ ou código para buscar em toda a base de clientes."}
               </FormDescription>

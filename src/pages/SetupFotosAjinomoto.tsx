@@ -125,7 +125,7 @@ export default function SetupFotosAjinomoto() {
       await saveQuestion({
         label: "Código do Cliente",
         question_type: "client_select",
-        description: "A lista mostra o código, a razão social e o CNPJ dos clientes do RCA selecionado.",
+        description: "Pesquise o cliente ativo por código, razão social ou CNPJ.",
         placeholder: "Buscar cliente por código, razão social ou CNPJ...",
         is_required: true,
         options: null,
@@ -186,7 +186,7 @@ export default function SetupFotosAjinomoto() {
           <CardContent className="space-y-4">
             <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
               <li>RCA independente, sem exigir gestor.</li>
-              <li>Cliente filtrado pelo RCA, com CNPJ e razão social.</li>
+              <li>Busca segura na base ativa, com código, CNPJ e razão social.</li>
               <li>Wobbler e Take One: uma opção ou as duas.</li>
               <li>Uma foto obrigatória e preservada no armazenamento privado.</li>
             </ul>
