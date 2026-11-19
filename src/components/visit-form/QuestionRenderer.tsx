@@ -252,14 +252,25 @@ export function QuestionRenderer({ question, form, sectionQuestions, templateSlu
     try {
       const { data, error } = await supabase
         .from("teams_vendors")
-        .select("nome_rca, cod_rca_lopes")
+        .select("nome_rca, cod_rca_lopes, nome_equipe")
         .eq("cargo", "vendedor")
         .order("cod_rca_lopes");
       if (error) throw error;
-      setVendors((data || []).map((vendor) => ({
-        value: vendor.cod_rca_lopes,
-        label: `${getCurrentRouteName(vendor.cod_rca_lopes, vendor.nome_rca || vendor.cod_rca_lopes)} (${vendor.cod_rca_lopes})`,
-      })));
+      setVendors((data || []).flatMap((vendor) => {
+        const currentName = getCurrentRouteName(
+          vendor.cod_rca_lopes,
+          vendor.nome_rca || vendor.cod_rca_lopes,
+        );
+        const normalizedName = currentName.trim().toLocaleUpperCase("pt-BR");
+        const normalizedTeam = String(vendor.nome_equipe || "").trim().toLocaleUpperCase("pt-BR");
+        const isVacant = /\bVAGO\b/.test(normalizedName);
+        const isTeamZ = /^Z\d*\s*-/.test(normalizedName) || /^EQUIPE\s+Z\b/.test(normalizedTeam);
+        if (isVacant || isTeamZ) return [];
+        return [{
+          value: vendor.cod_rca_lopes,
+          label: `${currentName} (${vendor.cod_rca_lopes})`,
+        }];
+      }));
     } catch (error) {
       console.error("Erro ao carregar todos os RCAs:", error);
       setVendors([]);
