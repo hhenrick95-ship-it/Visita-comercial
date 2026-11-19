@@ -44,7 +44,8 @@ const normalizeLabel = (value: unknown) => String(value ?? "")
  */
 export function SubmissionsList({ template }: Props) {
   const { submissions, loading, reload } = useFormSubmissions(template.id);
-  const { role } = useAuth();
+  const { role, user } = useAuth();
+  const isFotosAjinomoto = template.slug === "fotos-ajinomoto";
   const usesRouteResponsible = /pex.*visita.*(gerente|supervisor)/i.test(normalizeLabel(template.name));
   const [search, setSearch] = useState("");
   const [pdfId, setPdfId] = useState<string | null>(null);
@@ -159,10 +160,47 @@ export function SubmissionsList({ template }: Props) {
     if (!deleteId) return;
     setDeleting(true);
     try {
-      await supabase.from("form_responses").delete().eq("submission_id", deleteId);
+      const target = submissions.find((submission) => submission.id === deleteId);
+      const canDelete = role === "admin"
+        || (isFotosAjinomoto && target?.created_by === user?.id);
+      if (!canDelete) throw new Error("Você não tem permissão para excluir este registro.");
+
+      // Guarda os caminhos das fotos antes da exclusão. As respostas são
+      // removidas pelo ON DELETE CASCADE junto com a submissão.
+      const { data: imageResponses, error: imageError } = await supabase
+        .from("form_responses")
+        .select("response_value, form_questions!inner(question_type)")
+        .eq("submission_id", deleteId)
+        .eq("form_questions.question_type", "image_upload");
+      if (imageError) throw imageError;
+      const photoPaths = (imageResponses || []).flatMap((response: any) => {
+        const values = Array.isArray(response.response_value)
+          ? response.response_value
+          : [response.response_value];
+        return values.flatMap((value: unknown) => {
+          if (typeof value !== "string" || !value.trim()) return [];
+          try {
+            const url = new URL(value);
+            const match = url.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/form-images\/(.+)/);
+            return [match ? decodeURIComponent(match[1]) : value];
+          } catch {
+            return [value];
+          }
+        });
+      });
+
       const { error } = await supabase.from("form_submissions").delete().eq("id", deleteId);
       if (error) throw error;
-      toast.success("Registro excluído com sucesso!");
+
+      if (photoPaths.length > 0) {
+        const { error: storageError } = await supabase.storage.from("form-images").remove(photoPaths);
+        if (storageError) {
+          console.error("Erro ao remover fotos do registro excluído:", storageError);
+          toast.warning("Registro excluído, mas uma foto não pôde ser removida do armazenamento.");
+        }
+      }
+
+      toast.success("Registro e foto excluídos com sucesso!");
       setDeleteId(null);
       reload();
     } catch (e: any) {
@@ -326,7 +364,7 @@ export function SubmissionsList({ template }: Props) {
                             <span className="hidden sm:inline">PDF</span>
                           </Button>
                         )}
-                        {role === "admin" && (
+                        {(role === "admin" || (isFotosAjinomoto && s.created_by === user?.id)) && (
                           <Button
                             size="sm"
                             variant="destructive"
@@ -400,7 +438,7 @@ export function SubmissionsList({ template }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir registro</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O registro e todas as respostas serão removidos permanentemente.
+              Esta ação não pode ser desfeita. O registro, todas as respostas e a foto serão removidos permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
