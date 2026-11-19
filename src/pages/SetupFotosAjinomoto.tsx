@@ -138,12 +138,13 @@ export default function SetupFotosAjinomoto() {
       await saveQuestion({
         label: "Material da campanha",
         question_type: "multi_select",
-        description: "Marque Wobbler, Take One ou os dois materiais.",
+        description: "Marque Wobbler, Take One, Selo ou qualquer combinação dos materiais.",
         placeholder: null,
         is_required: true,
         options: [
           { value: "wobbler", label: "Wobbler" },
           { value: "take_one", label: "Take One" },
+          { value: "selo", label: "Selo" },
         ],
         slider_config: null,
         conditional_logic: null,
@@ -187,7 +188,7 @@ export default function SetupFotosAjinomoto() {
             <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
               <li>RCA independente, sem exigir gestor.</li>
               <li>Busca segura na base ativa, com código, CNPJ e razão social.</li>
-              <li>Wobbler e Take One: uma opção ou as duas.</li>
+              <li>Wobbler, Take One e Selo: uma ou mais opções.</li>
               <li>Uma foto obrigatória e preservada no armazenamento privado.</li>
             </ul>
             {ready ? (

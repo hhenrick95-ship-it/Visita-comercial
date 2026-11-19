@@ -399,6 +399,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
           "Razão Social": client?.razao_social || clientRaw.replace(/^\s*\d+\s*-\s*/, "").replace(/\s*-\s*CNPJ.*$/i, ""),
           Wobbler: materials.includes("wobbler") ? "Sim" : "Não",
           "Take One": materials.includes("take_one") ? "Sim" : "Não",
+          Selo: materials.includes("selo") ? "Sim" : "Não",
           "Link da foto": hasPhoto ? "Baixar foto" : "Sem foto",
         };
       });
@@ -406,7 +407,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       const worksheet = XLSX.utils.json_to_sheet(rows);
       rows.forEach((row, rowIndex) => {
         if (row["Link da foto"] !== "Baixar foto") return;
-        const cell = XLSX.utils.encode_cell({ r: rowIndex + 1, c: 8 });
+        const cell = XLSX.utils.encode_cell({ r: rowIndex + 1, c: 9 });
         worksheet[cell].l = {
           Target: `${window.location.origin}/form/${FOTOS_AJINOMOTO_SLUG}/foto/${perSub[rowIndex].s.id}`,
           Tooltip: "Abrir e baixar a foto do espaço",
@@ -414,7 +415,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
       });
       worksheet["!cols"] = [
         { wch: 20 }, { wch: 12 }, { wch: 38 }, { wch: 16 }, { wch: 20 },
-        { wch: 48 }, { wch: 12 }, { wch: 12 }, { wch: 18 },
+        { wch: 48 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 18 },
       ];
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Registros Ajinomoto");
