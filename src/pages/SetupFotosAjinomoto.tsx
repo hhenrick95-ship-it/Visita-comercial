@@ -52,15 +52,13 @@ export default function SetupFotosAjinomoto() {
         const { error } = await templates.update(templateValues).eq("id", template.id);
         if (error) throw error;
       } else {
-        const { data: lastTemplate } = await templates
-          .select("display_order")
-          .order("display_order", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const { data, error } = await templates.insert({
-          ...templateValues,
-          display_order: Number(lastTemplate?.display_order || 0) + 1,
-        }).select("id").single();
+        // O Lovable Cloud atual não expõe display_order em form_templates.
+        // A posição na interface é definida pelo nome; não dependemos dessa
+        // coluna opcional para criar o formulário.
+        const { data, error } = await templates
+          .insert(templateValues)
+          .select("id")
+          .single();
         if (error) throw error;
         template = data;
       }
