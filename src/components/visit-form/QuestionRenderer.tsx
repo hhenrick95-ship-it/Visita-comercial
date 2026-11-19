@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ImageUploader } from "@/components/ImageUploader";
+import { getCurrentRouteName, getCurrentTeamName } from "@/data/winthorRouteDirectory";
 import { Combobox } from "@/components/ui/combobox";
 import { UseFormReturn } from "react-hook-form";
 import { useState, useEffect } from "react";
@@ -240,7 +241,8 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
         // Remover prefixo de letra de equipe (ex: "A - ", "B02 - ", "K - ")
         const nomeClean = nomeRca.replace(/^[A-Z]\d*\s*-\s*/i, '').trim();
         const cargoLabel = member.cargo === "coordenador" ? "Coordenador" : member.cargo === "gerente" ? "Gerente" : "Supervisor";
-        const equipeName = (member.nome_equipe || 'Equipe').trim().split(' - ')[0].trim(); // Apenas "EQUIPE X"
+        const currentTeamName = getCurrentTeamName(member.cod_equipe, member.nome_equipe || "Equipe");
+        const equipeName = currentTeamName.trim().split(' - ')[0].trim(); // Apenas "EQUIPE X"
         return {
           value: member.cod_rca_lopes,
           label: `${equipeName} - ${nomeClean} (${cargoLabel})`
@@ -329,7 +331,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
       
       setVendors(data.map(vendor => ({
         value: vendor.cod_rca_lopes,
-        label: `${vendor.nome_rca || vendor.cod_rca_lopes} (${vendor.cod_rca_lopes})`
+        label: `${getCurrentRouteName(vendor.cod_rca_lopes, vendor.nome_rca || vendor.cod_rca_lopes)} (${vendor.cod_rca_lopes})`
       })));
     } catch (error) {
       console.error("Erro ao carregar vendedores da equipe:", error);
