@@ -663,6 +663,7 @@ export function DynamicForm({ template }: DynamicFormProps) {
                         question={q as any}
                         form={form}
                         sectionQuestions={questions[sections[currentSection].id] as any}
+                        templateSlug={template.slug}
                       />
                     ))}
                   </CardContent>

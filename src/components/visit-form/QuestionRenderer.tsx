@@ -31,6 +31,7 @@ interface FormQuestion {
 interface QuestionRendererProps {
   question: FormQuestion;
   form: UseFormReturn<any>;
+  templateSlug?: string;
   /**
    * Lista de perguntas da MESMA seção, em ordem. Usada como fallback para
    * resolver automaticamente o vínculo entre vendor_select (RCA) e o
@@ -52,7 +53,7 @@ interface TeamMember {
   supervisor_id: string | null;
 }
 
-export function QuestionRenderer({ question, form, sectionQuestions }: QuestionRendererProps) {
+export function QuestionRenderer({ question, form, sectionQuestions, templateSlug }: QuestionRendererProps) {
   const fieldKey = `q_${question.id}`;
   const [gestores, setGestores] = useState<{ value: string; label: string }[]>([]);
   const [vendors, setVendors] = useState<{ value: string; label: string }[]>([]);
@@ -63,6 +64,8 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
   const [loadingClients, setLoadingClients] = useState(false);
   const isStandaloneVendor = question.conditional_logic?.standalone === true;
   const showClientDetails = question.conditional_logic?.show_client_details === true;
+  const usesSecureClientSearch = showClientDetails
+    || (templateSlug === "fotos-ajinomoto" && question.question_type === "client_select");
 
   // Resolve qual pergunta vendor_select (RCA) alimenta este client_select.
   // 1) usa conditional_logic.vendor_question_id se existir
@@ -89,7 +92,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
   // ou via clientes_cadastro_rcas, que guarda vínculos adicionais).
   useEffect(() => {
     if (question.question_type !== "client_select") return;
-    if (!showClientDetails && vendorFieldKey && !watchedVendorValue) {
+    if (!usesSecureClientSearch && vendorFieldKey && !watchedVendorValue) {
       setClients([]);
       return;
     }
@@ -102,7 +105,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
         // O formulário Fotos Ajinomoto usa a busca segura já existente no
         // backend. Assim a conta limitada pode localizar clientes ativos sem
         // receber papel de Gestor nem acesso direto às tabelas cadastrais.
-        if (showClientDetails) {
+        if (usesSecureClientSearch) {
           const { data, error } = await supabase.rpc("search_clientes_pesquisa", {
             p_term: term || "",
           });
@@ -183,7 +186,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [question.question_type, clientSearch, vendorFieldKey, watchedVendorValue, showClientDetails]);
+  }, [question.question_type, clientSearch, vendorFieldKey, watchedVendorValue, showClientDetails, usesSecureClientSearch]);
 
   // Resolve qual pergunta team_select alimenta este vendor_select.
   // 1) usa conditional_logic.team_question_id se existir
@@ -794,7 +797,11 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                 {question.label}
                 {question.is_required && <span className="text-destructive ml-1">*</span>}
               </FormLabel>
-              {question.description && <FormDescription>{question.description}</FormDescription>}
+              {usesSecureClientSearch ? (
+                <FormDescription>Pesquise o cliente ativo por código, razão social ou CNPJ.</FormDescription>
+              ) : question.description ? (
+                <FormDescription>{question.description}</FormDescription>
+              ) : null}
               <FormControl>
                 <Combobox
                   options={clients}
@@ -809,9 +816,9 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                   emptyMessage={
                     loadingClients
                       ? "Carregando..."
-                      : !showClientDetails && vendorFieldKey && !watchedVendorValue
+                      : !usesSecureClientSearch && vendorFieldKey && !watchedVendorValue
                         ? "Selecione um RCA primeiro"
-                        : showClientDetails
+                        : usesSecureClientSearch
                           ? "Nenhum cliente ativo encontrado na base."
                         : vendorFieldKey
                           ? "Nenhum cliente encontrado para este RCA."
@@ -820,7 +827,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                 />
               </FormControl>
               <FormDescription>
-                {showClientDetails
+                {usesSecureClientSearch
                   ? "Pesquise na base ativa por código, razão social ou CNPJ."
                   : vendorFieldKey
                   ? "Lista restrita aos clientes do RCA selecionado. Digite parte do nome, CNPJ ou código para filtrar."
