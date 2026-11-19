@@ -1,5 +1,6 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { isRestrictedMerchanPath, isRestrictedMerchanUser } from "@/lib/restrictedFormAccess";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -8,6 +9,7 @@ interface ProtectedRouteProps {
 
 export const ProtectedRoute = ({ children, requireRole = "any" }: ProtectedRouteProps) => {
   const { user, role, isApproved, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -23,6 +25,10 @@ export const ProtectedRoute = ({ children, requireRole = "any" }: ProtectedRoute
 
   if (!isApproved) {
     return <Navigate to="/pending" replace />;
+  }
+
+  if (isRestrictedMerchanUser(user.email) && !isRestrictedMerchanPath(location.pathname)) {
+    return <Navigate to="/" replace />;
   }
 
   if (requireRole === "admin" && role !== "admin") {

@@ -8,6 +8,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatDateOnlyPtBR } from "@/lib/utils";
 import { yesScore } from "@/lib/submissionScore";
 import { SubmissionsResultsMap, type MapPoint } from "@/components/SubmissionsResultsMap";
+import { getCurrentRouteName } from "@/data/winthorRouteDirectory";
+import { FOTOS_AJINOMOTO_SLUG } from "@/lib/restrictedFormAccess";
 
 interface Question { id: string; label: string; question_type: string; options: any; section: string; order: number }
 export interface DashSubmission { id: string; visit_date: string; submitted_at?: string; created_by: string | null; latitude: number | null; longitude: number | null; address: string | null; metadata: any }
@@ -79,6 +81,7 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
   const [teamMemberNames, setTeamMemberNames] = useState<Record<string, string>>({});
   const allSubmissionIds = useMemo(() => submissions.map(s => s.id), [submissions]);
   const isPexJbp = /pex.*j(?:bp|pb)/i.test(templateName);
+  const isFotosAjinomoto = normalizeText(templateName) === "fotos ajinomoto";
   const usesRouteResponsible = /pex.*visita.*(gerente|supervisor)/i.test(normalizeText(templateName));
 
   useEffect(() => {
@@ -355,7 +358,70 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
     else onDrill({ label: `Rede: ${network}`, ids: allPerSub.filter(item => item.network === network).map(item => item.s.id) });
   };
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    if (isFotosAjinomoto) {
+      const rcaQuestion = questions.find((question) => question.question_type === "vendor_select");
+      const clientQuestion = questions.find((question) => question.question_type === "client_select");
+      const materialQuestion = questions.find((question) => normalizeText(question.label) === "material da campanha");
+      const photoQuestion = questions.find((question) => question.question_type === "image_upload");
+
+      const clientCodes = [...new Set(perSub.flatMap(({ s }) => {
+        const raw = clientQuestion ? bySub.get(s.id)?.get(clientQuestion.id) : "";
+        const match = String(raw || "").match(/^\s*(\d+)/);
+        return match ? [Number(match[1])] : [];
+      }))];
+      const clientRows: any[] = [];
+      for (let index = 0; index < clientCodes.length; index += 500) {
+        const { data, error } = await supabase
+          .from("clientes_cadastro")
+          .select("codcli, cnpj, razao_social")
+          .in("codcli", clientCodes.slice(index, index + 500));
+        if (error) throw error;
+        clientRows.push(...(data || []));
+      }
+      const clientsByCode = new Map(clientRows.map((client) => [String(client.codcli), client]));
+
+      const rows = perSub.map(({ s }) => {
+        const answers = bySub.get(s.id) || new Map<string, any>();
+        const rcaCode = String(rcaQuestion ? answers.get(rcaQuestion.id) || "" : "").trim();
+        const clientRaw = String(clientQuestion ? answers.get(clientQuestion.id) || "" : "");
+        const clientCode = clientRaw.match(/^\s*(\d+)/)?.[1] || "";
+        const client = clientsByCode.get(clientCode);
+        const materials = materialQuestion ? asList(answers.get(materialQuestion.id)) : [];
+        const hasPhoto = Boolean(photoQuestion && asList(answers.get(photoQuestion.id)).filter(Boolean).length);
+        const submittedAt = s.submitted_at ? new Date(s.submitted_at) : new Date(`${s.visit_date}T12:00:00`);
+        return {
+          "Data e hora": submittedAt.toLocaleString("pt-BR"),
+          "Código RCA": rcaCode,
+          "Nome RCA": rcaCode ? getCurrentRouteName(rcaCode, rcaNames[rcaCode] || rcaCode) : "",
+          "Código Cliente": clientCode,
+          CNPJ: client?.cnpj || "",
+          "Razão Social": client?.razao_social || clientRaw.replace(/^\s*\d+\s*-\s*/, "").replace(/\s*-\s*CNPJ.*$/i, ""),
+          Wobbler: materials.includes("wobbler") ? "Sim" : "Não",
+          "Take One": materials.includes("take_one") ? "Sim" : "Não",
+          "Link da foto": hasPhoto ? "Baixar foto" : "Sem foto",
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      rows.forEach((row, rowIndex) => {
+        if (row["Link da foto"] !== "Baixar foto") return;
+        const cell = XLSX.utils.encode_cell({ r: rowIndex + 1, c: 8 });
+        worksheet[cell].l = {
+          Target: `${window.location.origin}/form/${FOTOS_AJINOMOTO_SLUG}/foto/${perSub[rowIndex].s.id}`,
+          Tooltip: "Abrir e baixar a foto do espaço",
+        };
+      });
+      worksheet["!cols"] = [
+        { wch: 20 }, { wch: 12 }, { wch: 38 }, { wch: 16 }, { wch: 20 },
+        { wch: 48 }, { wch: 12 }, { wch: 12 }, { wch: 18 },
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Registros Ajinomoto");
+      XLSX.writeFile(workbook, "fotos-ajinomoto.xlsx");
+      return;
+    }
+
     const wb = XLSX.utils.book_new();
     const resumo: any[] = [];
     stats.forEach(s => s.kind === "num"
@@ -421,8 +487,8 @@ export function SubmissionsDashboard({ templateId, templateName, submissions, na
         <h2 className="text-lg font-semibold flex items-center gap-2"><BarChart3 className="h-5 w-5 text-primary" />Painel de resultados</h2>
         {!loading && (
           <div className="flex gap-2">
-            <Button variant="outline" className="min-h-11 gap-2" onClick={exportExcel}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
-            <Button variant="outline" className="min-h-11 gap-2" onClick={exportPdf}><FileDown className="h-4 w-4" />PDF</Button>
+            <Button variant="outline" className="min-h-11 gap-2" onClick={() => void exportExcel()}><FileSpreadsheet className="h-4 w-4" />Excel</Button>
+            {!isFotosAjinomoto && <Button variant="outline" className="min-h-11 gap-2" onClick={exportPdf}><FileDown className="h-4 w-4" />PDF</Button>}
           </div>
         )}
       </div>

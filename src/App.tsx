@@ -27,6 +27,9 @@ import ClientUpdate from "./pages/ClientUpdate";
 import PesquisaSatisfacaoLogistica from "./pages/PesquisaSatisfacaoLogistica";
 import SatisfacaoLogisticaResultados from "./pages/SatisfacaoLogisticaResultados";
 import NotFound from "./pages/NotFound";
+import FotosAjinomotoResults from "./pages/FotosAjinomotoResults";
+import FotosAjinomotoPhoto from "./pages/FotosAjinomotoPhoto";
+import SetupFotosAjinomoto from "./pages/SetupFotosAjinomoto";
 
 const queryClient = new QueryClient();
 
@@ -66,6 +69,22 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <VisitaComercial />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/form/fotos-ajinomoto/resultados"
+              element={
+                <ProtectedRoute>
+                  <FotosAjinomotoResults />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/form/fotos-ajinomoto/foto/:submissionId"
+              element={
+                <ProtectedRoute>
+                  <FotosAjinomotoPhoto />
                 </ProtectedRoute>
               }
             />
@@ -127,6 +146,14 @@ const App = () => (
             />
             
             {/* Admin-only routes */}
+            <Route
+              path="/admin/setup-fotos-ajinomoto"
+              element={
+                <ProtectedRoute requireRole="admin">
+                  <SetupFotosAjinomoto />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/users"
               element={

@@ -61,6 +61,8 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
   const [clients, setClients] = useState<{ value: string; label: string }[]>([]);
   const [clientSearch, setClientSearch] = useState("");
   const [loadingClients, setLoadingClients] = useState(false);
+  const isStandaloneVendor = question.conditional_logic?.standalone === true;
+  const showClientDetails = question.conditional_logic?.show_client_details === true;
 
   // Resolve qual pergunta vendor_select (RCA) alimenta este client_select.
   // 1) usa conditional_logic.vendor_question_id se existir
@@ -144,7 +146,9 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
           (data || []).map((c) => {
             const nome = c.nome_fantasia?.trim() || c.razao_social;
             const local = [c.cidade, c.uf].filter(Boolean).join("/");
-            const label = `${c.codcli} - ${nome}${local ? ` - ${local}` : ""}`;
+            const label = showClientDetails
+              ? `${c.codcli} - ${c.razao_social || nome}${c.cnpj ? ` - CNPJ ${c.cnpj}` : ""}`
+              : `${c.codcli} - ${nome}${local ? ` - ${local}` : ""}`;
             // Guarda o texto completo para aparecer legível no PDF e nos relatórios
             return { value: label, label };
           })
@@ -160,7 +164,7 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [question.question_type, clientSearch, vendorFieldKey, watchedVendorValue]);
+  }, [question.question_type, clientSearch, vendorFieldKey, watchedVendorValue, showClientDetails]);
 
   // Resolve qual pergunta team_select alimenta este vendor_select.
   // 1) usa conditional_logic.team_question_id se existir
@@ -192,7 +196,8 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
   useEffect(() => {
     if (question.question_type !== "vendor_select") return;
     if (!teamFieldKey) {
-      setVendors([]);
+      if (isStandaloneVendor) loadAllVendors();
+      else setVendors([]);
       return;
     }
     if (watchedTeamValue) {
@@ -200,7 +205,28 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
     } else {
       setVendors([]);
     }
-  }, [question.question_type, teamFieldKey, watchedTeamValue]);
+  }, [question.question_type, teamFieldKey, watchedTeamValue, isStandaloneVendor]);
+
+  const loadAllVendors = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("teams_vendors")
+        .select("nome_rca, cod_rca_lopes")
+        .eq("cargo", "vendedor")
+        .order("cod_rca_lopes");
+      if (error) throw error;
+      setVendors((data || []).map((vendor) => ({
+        value: vendor.cod_rca_lopes,
+        label: `${getCurrentRouteName(vendor.cod_rca_lopes, vendor.nome_rca || vendor.cod_rca_lopes)} (${vendor.cod_rca_lopes})`,
+      })));
+    } catch (error) {
+      console.error("Erro ao carregar todos os RCAs:", error);
+      setVendors([]);
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const loadGestores = async () => {
     setLoading(true);
@@ -723,9 +749,9 @@ export function QuestionRenderer({ question, form, sectionQuestions }: QuestionR
                   emptyMessage={
                     loading
                       ? "Carregando..."
-                      : !teamFieldKey
+                      : !teamFieldKey && !isStandaloneVendor
                         ? "Configuração inválida: defina o gestor vinculado a este RCA."
-                        : vendors.length === 0
+                        : teamFieldKey && vendors.length === 0
                           ? "Selecione um gestor primeiro"
                           : "Nenhum RCA encontrado."
                   }

@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { FOTOS_AJINOMOTO_SLUG, isRestrictedMerchanUser } from "@/lib/restrictedFormAccess";
 
 // Componente extraído para evitar duplicação e garantir consistência
 const SettingsMenu = ({ 
@@ -60,9 +61,11 @@ export const Navbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isAdmin = role === "admin";
+  const isMerchanRestricted = isRestrictedMerchanUser(user?.email);
 
   // Diagnóstico: verificar se o botão existe e está visível
   useEffect(() => {
+    if (isMerchanRestricted) return;
     const checkSettingsButton = () => {
       const btn = document.getElementById("navbar-settings");
       if (!btn) {
@@ -79,7 +82,7 @@ export const Navbar = () => {
     // Check after render
     const timer = setTimeout(checkSettingsButton, 500);
     return () => clearTimeout(timer);
-  }, [location.pathname]);
+  }, [location.pathname, isMerchanRestricted]);
 
   // Main navigation items (shown in navbar)
   const mainNavItems = [
@@ -100,13 +103,17 @@ export const Navbar = () => {
     { path: "/satisfacao-logistica", label: "Satisfação Logística", icon: Truck, roles: ["admin"] },
   ];
 
-  const filteredMainItems = mainNavItems.filter((item) =>
-    item.roles.includes(role || "")
-  );
+  const filteredMainItems = isMerchanRestricted
+    ? [
+        { path: "/", label: "Início", roles: ["usuario"] },
+        { path: `/form/${FOTOS_AJINOMOTO_SLUG}`, label: "Preencher", roles: ["usuario"] },
+        { path: `/form/${FOTOS_AJINOMOTO_SLUG}/resultados`, label: "Resultados", roles: ["usuario"] },
+      ]
+    : mainNavItems.filter((item) => item.roles.includes(role || ""));
 
-  const filteredSettingsItems = settingsItems.filter((item) =>
-    item.roles.includes(role || "")
-  );
+  const filteredSettingsItems = isMerchanRestricted
+    ? []
+    : settingsItems.filter((item) => item.roles.includes(role || ""));
 
   return (
     <nav className="glass-card border-0 border-b border-border/60 sticky top-0 z-[200] isolate backdrop-blur-xl">
@@ -167,7 +174,7 @@ export const Navbar = () => {
             </div>
 
             {/* ⚠️ ENGRENAGEM - SEMPRE VISÍVEL */}
-            <SettingsMenu items={filteredSettingsItems} />
+            {!isMerchanRestricted && <SettingsMenu items={filteredSettingsItems} />}
 
             {/* Botão Sair */}
             <Button
@@ -183,10 +190,12 @@ export const Navbar = () => {
 
           {/* Mobile: Engrenagem + Menu Button */}
           <div className="md:hidden flex items-center gap-2 shrink-0">
-            <SettingsMenu 
-              items={filteredSettingsItems} 
-              onItemClick={() => setMobileMenuOpen(false)}
-            />
+            {!isMerchanRestricted && (
+              <SettingsMenu
+                items={filteredSettingsItems}
+                onItemClick={() => setMobileMenuOpen(false)}
+              />
+            )}
 
             {/* Botão Menu Hamburger */}
             <Button

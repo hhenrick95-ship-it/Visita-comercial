@@ -4,10 +4,18 @@ import { VisitForm } from "@/components/VisitForm";
 import { DynamicForm } from "@/components/DynamicForm";
 import { useFormTemplate } from "@/hooks/useFormTemplates";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { FOTOS_AJINOMOTO_SLUG, isRestrictedMerchanUser } from "@/lib/restrictedFormAccess";
 
 export default function DynamicFormPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { template, loading } = useFormTemplate(slug);
+
+  if (isRestrictedMerchanUser(user?.email) && slug !== FOTOS_AJINOMOTO_SLUG) {
+    return <Navigate to="/" replace />;
+  }
 
   // Blindagem: o formulário padrão "Visita Comercial" tem rota dedicada
   // (/visitas/nova/visita-comercial). Se algum link antigo cair em
@@ -22,8 +30,6 @@ export default function DynamicFormPage() {
   if (slug === "atualizacao-do-ramo-de-atividade") {
     return <Navigate to="/clientes/atualizacao-cadastral" replace />;
   }
-
-  const { template, loading } = useFormTemplate(slug);
 
   if (loading) {
     return (

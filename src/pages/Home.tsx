@@ -23,6 +23,8 @@ import {
   PlusCircle,
   UserCog,
   Truck,
+  Camera,
+  FileSpreadsheet,
 } from "lucide-react";
 import { getShortManagerName } from "@/lib/normalizeManager";
 import { formatDateOnlyPtBR, toDateOnlyString } from "@/lib/utils";
@@ -30,6 +32,7 @@ import { useFormTemplates } from "@/hooks/useFormTemplates";
 import * as Icons from "lucide-react";
 import { getSupplierForSlug } from "@/lib/formSuppliers";
 import logoLopes from "@/assets/logo-lopes.png";
+import { FOTOS_AJINOMOTO_SLUG, isRestrictedMerchanUser } from "@/lib/restrictedFormAccess";
 
 interface VisitLite {
   id: string;
@@ -64,6 +67,7 @@ export default function Home() {
   const { templates: activeTemplates, loading: templatesLoading } = useFormTemplates({ activeOnly: true });
 
   const isAdmin = role === "admin";
+  const isMerchanRestricted = isRestrictedMerchanUser(user?.email);
 
   const loadAll = async () => {
     try {
@@ -88,12 +92,17 @@ export default function Home() {
   useEffect(() => {
     if (role === null) return;
 
+    if (isMerchanRestricted) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     loadAll();
     const onFocus = () => loadAll();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [role]);
+  }, [role, isMerchanRestricted]);
 
   const stats = useMemo(() => {
     const today = toDateOnlyString(new Date());
@@ -129,6 +138,61 @@ export default function Home() {
     (user?.user_metadata?.full_name as string | undefined) ||
     user?.email?.split("@")[0] ||
     "";
+
+  if (isMerchanRestricted) {
+    return (
+      <Layout>
+        <div className="relative min-h-[calc(100vh-4rem)] bg-mesh">
+          <div className="container mx-auto max-w-4xl px-4 py-10 space-y-6">
+            <section className="rounded-2xl glass-card p-6 md:p-10">
+              <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-3">
+                  <Badge variant="secondary">Acesso da equipe de merchandising</Badge>
+                  <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Fotos Ajinomoto</h1>
+                  <p className="max-w-xl text-muted-foreground">
+                    Registre o RCA, selecione o cliente, informe os materiais instalados e envie uma foto do espaço.
+                  </p>
+                </div>
+                <img src={logoLopes} alt="Lopes Distribuidora" className="h-20 w-auto object-contain" />
+              </div>
+            </section>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="glass-card border-0">
+                <CardHeader>
+                  <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+                    <Camera className="h-6 w-6 text-primary" />
+                  </div>
+                  <CardTitle>Preencher formulário</CardTitle>
+                  <CardDescription>Enviar um novo registro com uma foto.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button asChild className="w-full min-h-11">
+                    <Link to={`/form/${FOTOS_AJINOMOTO_SLUG}`}>Começar</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card border-0">
+                <CardHeader>
+                  <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+                    <FileSpreadsheet className="h-6 w-6 text-primary" />
+                  </div>
+                  <CardTitle>Visualizar resultados</CardTitle>
+                  <CardDescription>Consultar os registros e exportar a planilha Excel.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button asChild variant="outline" className="w-full min-h-11">
+                    <Link to={`/form/${FOTOS_AJINOMOTO_SLUG}/resultados`}>Ver resultados</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   // Quick actions (filtered by role)
   const quickActions = [
